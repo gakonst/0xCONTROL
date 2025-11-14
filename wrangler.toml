@@ -18,5 +18,11 @@ new_classes = ["SongCatalogDO"]
 binding = "TRACKS_BUCKET"
 bucket_name = "zero-control-tracks"
 
+[vars]
+SONG_PASSWORD = "true"
+
 [env.preview]
 name = "zero-control-dapp-preview"
+
+[env.preview.vars]
+SONG_PASSWORD = "true"

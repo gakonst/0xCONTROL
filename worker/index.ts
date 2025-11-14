@@ -73,16 +73,22 @@ async function handleCatalogRequest(request: Request, env: Env): Promise<Respons
     })
   }
 
-  const authHeader = request.headers.get('Authorization') ?? ''
-  const token = authHeader.startsWith('Bearer ')
-    ? authHeader.slice('Bearer '.length).trim()
-    : null
+  // Preview deployments disable authentication by setting SONG_PASSWORD to "true".
+  const expectedPassword = (env.SONG_PASSWORD ?? 'true').trim()
+  const isPasswordDisabled = expectedPassword.toLowerCase() === 'true'
 
-  if (!token || token.length === 0 || token !== env.SONG_PASSWORD) {
-    return new Response('Unauthorized', {
-      status: 401,
-      headers: { 'WWW-Authenticate': 'Bearer' },
-    })
+  if (!isPasswordDisabled) {
+    const authHeader = request.headers.get('Authorization') ?? ''
+    const token = authHeader.startsWith('Bearer ')
+      ? authHeader.slice('Bearer '.length).trim()
+      : null
+
+    if (!token || token.length === 0 || token !== expectedPassword) {
+      return new Response('Unauthorized', {
+        status: 401,
+        headers: { 'WWW-Authenticate': 'Bearer' },
+      })
+    }
   }
 
   const id = env.SONG_CATALOG.idFromName(CATALOG_OBJECT_NAME)
