@@ -6,3 +6,17 @@ compatibility_date = "2024-06-15"
 directory = "./dist"
 binding = "ASSETS"
 
+[[durable_objects.bindings]]
+name = "SONG_CATALOG"
+class_name = "SongCatalogDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["SongCatalogDO"]
+
+[[r2_buckets]]
+binding = "TRACKS_BUCKET"
+bucket_name = "zero-control-tracks"
+
+[env.preview]
+name = "zero-control-dapp-preview"
