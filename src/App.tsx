@@ -6,7 +6,20 @@ import { WalletStatus } from './components/WalletStatus'
 
 function App() {
   const { isConnected } = useAccount()
-  const { connectors, connectAsync, error, isPending, pendingConnector } = useConnect()
+  const { connectors, connectAsync, error, status, variables } = useConnect()
+  const isConnecting = status === 'pending'
+
+  const isConnectorPending = useCallback(
+    (connector: Connector) => {
+      const activeConnector = variables?.connector
+      if (!activeConnector) return false
+      if ('id' in activeConnector) {
+        return activeConnector.id === connector.id
+      }
+      return false
+    },
+    [variables?.connector],
+  )
   const { disconnect } = useDisconnect()
 
   const handleConnect = useCallback(
@@ -41,12 +54,12 @@ function App() {
               <button
                 key={connector.id}
                 className="button"
-                disabled={!connector.ready || isPending}
+                disabled={!connector.ready || isConnecting}
                 onClick={() => handleConnect(connector)}
               >
                 {connector.name}
                 {!connector.ready && ' (unsupported)'}
-                {isPending && pendingConnector?.id === connector.id && '…'}
+                {isConnecting && isConnectorPending(connector) && '…'}
               </button>
             ))}
           </div>

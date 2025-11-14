@@ -2,7 +2,7 @@ import { createConfig, http } from 'wagmi'
 import { mainnet, optimism, polygon, sepolia } from 'wagmi/chains'
 import { injected, walletConnect } from 'wagmi/connectors'
 
-const chains = [mainnet, polygon, optimism, sepolia]
+const chains = [mainnet, polygon, optimism, sepolia] as const
 
 const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID
 
