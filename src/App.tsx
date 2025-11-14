@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import type { Connector } from 'wagmi'
 import { useAccount, useConnect, useDisconnect } from 'wagmi'
 
+import { SongCatalog } from './components/SongCatalog'
 import { WalletStatus } from './components/WalletStatus'
 
 function App() {
@@ -68,6 +69,7 @@ function App() {
       </section>
 
       <WalletStatus />
+      <SongCatalog />
     </main>
   )
 }
