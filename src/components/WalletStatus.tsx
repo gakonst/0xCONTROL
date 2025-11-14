@@ -21,7 +21,6 @@ export function WalletStatus() {
       enabled: Boolean(address && chain?.id),
       refetchInterval: 12_000,
     },
-    watch: true,
   })
 
   if (!isConnected) {
