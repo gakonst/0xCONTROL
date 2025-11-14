@@ -43,7 +43,7 @@ jobs:
           SONG_PASSWORD: 'true'
         run: |
           set -euo pipefail
-          npx wrangler deploy --config wrangler.toml --env preview --quiet
+          npx wrangler deploy --config wrangler.toml --env preview
 
       - name: Resolve preview URL
         id: preview_url
