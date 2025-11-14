@@ -55,54 +55,54 @@ jobs:
           set -euo pipefail
           preview_url=$(npx wrangler deployments list --config wrangler.toml --env preview --json \
             | node <<'NODE'
-const fs = require('fs')
-const input = fs.readFileSync(0, 'utf8').trim()
-if (!input) {
-  process.exit(0)
-}
+            const fs = require('fs')
+            const input = fs.readFileSync(0, 'utf8').trim()
+            if (!input) {
+              process.exit(0)
+            }
 
-let data
-try {
-  data = JSON.parse(input)
-} catch (error) {
-  console.warn('Failed to parse deployments list:', error)
-  process.exit(0)
-}
+            let data
+            try {
+              data = JSON.parse(input)
+            } catch (error) {
+              console.warn('Failed to parse deployments list:', error)
+              process.exit(0)
+            }
 
-const urlPattern = /^https:\/\/[A-Za-z0-9.-]+/u
+            const urlPattern = /^https:\/\/[A-Za-z0-9.-]+/u
 
-const findPreviewUrl = (value) => {
-  if (typeof value === 'string' && urlPattern.test(value) && value.includes('workers.dev')) {
-    return value
-  }
+            const findPreviewUrl = (value) => {
+              if (typeof value === 'string' && urlPattern.test(value) && value.includes('workers.dev')) {
+                return value
+              }
 
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const result = findPreviewUrl(item)
-      if (result) {
-        return result
-      }
-    }
-    return null
-  }
+              if (Array.isArray(value)) {
+                for (const item of value) {
+                  const result = findPreviewUrl(item)
+                  if (result) {
+                    return result
+                  }
+                }
+                return null
+              }
 
-  if (value && typeof value === 'object') {
-    for (const item of Object.values(value)) {
-      const result = findPreviewUrl(item)
-      if (result) {
-        return result
-      }
-    }
-  }
+              if (value && typeof value === 'object') {
+                for (const item of Object.values(value)) {
+                  const result = findPreviewUrl(item)
+                  if (result) {
+                    return result
+                  }
+                }
+              }
 
-  return null
-}
+              return null
+            }
 
-const previewUrl = findPreviewUrl(data)
-if (previewUrl) {
-  console.log(previewUrl)
-}
-NODE
+            const previewUrl = findPreviewUrl(data)
+            if (previewUrl) {
+              console.log(previewUrl)
+            }
+            NODE
           preview_url=${preview_url//$'\n'/}
           echo "preview_url=$preview_url" >> "$GITHUB_OUTPUT"
 
