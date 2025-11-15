@@ -1,4 +1,4 @@
-import { CSSProperties, FormEvent, useCallback, useMemo, useState } from 'react'
+import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
@@ -6,6 +6,7 @@ import { Card, CardContent } from './ui/card'
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
+import { cn } from '../lib/utils'
 
 type TrackRecord = {
   id: string
@@ -93,6 +94,8 @@ export function SongCatalog() {
   const [isCredentialDialogOpen, setIsCredentialDialogOpen] = useState(false)
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null)
   const [draft, setDraft] = useState<EditableTrackFields | null>(null)
+  const [activeTrackId, setActiveTrackId] = useState<string | null>(() => DEMO_TRACKS[0]?.id ?? null)
+  const [isPlayerOpen, setIsPlayerOpen] = useState(false)
 
   const editingTrack = useMemo(() => tracks.find((track) => track.id === editingTrackId) ?? null, [tracks, editingTrackId])
 
@@ -202,209 +205,319 @@ export function SongCatalog() {
     setDraft(null)
   }, [])
 
+  useEffect(() => {
+    if (!tracks.length) {
+      setActiveTrackId(null)
+      return
+    }
+
+    const exists = activeTrackId && tracks.some((track) => track.id === activeTrackId)
+    if (!exists) {
+      setActiveTrackId(tracks[0].id)
+    }
+  }, [activeTrackId, tracks])
+
+  const activeTrack = useMemo(() => tracks.find((track) => track.id === activeTrackId) ?? null, [tracks, activeTrackId])
+
+  const handleTrackSelect = useCallback((trackId: string) => {
+    setActiveTrackId(trackId)
+  }, [])
+
+  const togglePlayer = useCallback(() => {
+    setIsPlayerOpen((previous) => !previous)
+  }, [])
+
+  const closePlayer = useCallback(() => setIsPlayerOpen(false), [])
+
   return (
-    <Card className="mix-card" variant="translucent">
-      <CardContent>
-        <div className="mix-card__top">
-          <div>
-            <p className="eyebrow">Mix mode</p>
-            <h2 className="mix-card__title">Zero Control Sessions</h2>
-            <p className="mix-card__subtitle">
-              Real-time crates curated from your R2 catalog. Long-press a song tile to fine-tune BPM, key or tag.
-            </p>
-            <div className="mix-card__stats">
-              <Badge variant="outline">{tracks.length} tracks</Badge>
-              <Badge variant="outline">Avg {averageBpm} BPM</Badge>
-              <Badge variant="outline">Peak energy {peakEnergy}%</Badge>
+    <>
+      <Card className="mix-card" variant="translucent">
+        <CardContent>
+          <div className="mix-card__top">
+            <div>
+              <p className="eyebrow">Mix mode</p>
+              <h2 className="mix-card__title">Zero Control Sessions</h2>
+              <p className="mix-card__subtitle">
+                Real-time crates curated from your R2 catalog. Long-press a song tile to fine-tune BPM, key or tag.
+              </p>
+              <div className="mix-card__stats">
+                <Badge variant="outline">{tracks.length} tracks</Badge>
+                <Badge variant="outline">Avg {averageBpm} BPM</Badge>
+                <Badge variant="outline">Peak energy {peakEnergy}%</Badge>
+              </div>
+            </div>
+            <div className="mix-card__actions">
+              <Button variant="secondary" onClick={handleRefresh} disabled={isLoading}>
+                {isLoading ? 'Syncing…' : 'Sync catalog'}
+              </Button>
+              <Button variant="ghost" onClick={() => setIsCredentialDialogOpen(true)}>
+                Update credential
+              </Button>
             </div>
           </div>
-          <div className="mix-card__actions">
-            <Button variant="secondary" onClick={handleRefresh} disabled={isLoading}>
-              {isLoading ? 'Syncing…' : 'Sync catalog'}
-            </Button>
-            <Button variant="ghost" onClick={() => setIsCredentialDialogOpen(true)}>
-              Update credential
-            </Button>
+
+          {error && <p className="mix-card__error">{error}</p>}
+
+          <div className="mix-legend">
+            <p>Hold to edit · Release to keep playing</p>
+            <div className="mix-legend__chips">
+              {ACCENTS.slice(0, 3).map((color) => (
+                <span key={color} className="mix-legend__chip" style={{ backgroundColor: color }} />
+              ))}
+            </div>
           </div>
-        </div>
 
-        {error && <p className="mix-card__error">{error}</p>}
-
-        <div className="mix-legend">
-          <p>Hold to edit · Release to keep playing</p>
-          <div className="mix-legend__chips">
-            {ACCENTS.slice(0, 3).map((color) => (
-              <span key={color} className="mix-legend__chip" style={{ backgroundColor: color }} />
-            ))}
-          </div>
-        </div>
-
-        <div className="mix-list">
-          {tracks.map((track) => {
-            const pressHandlers = createLongPressHandlers(() => handleTrackPress(track.id))
-            return (
-              <article
-                key={track.id}
-                className="mix-row"
-                style={{ '--track-accent': track.accent } as CSSProperties}
-                {...pressHandlers}
-              >
-                <div className="mix-row__primary">
-                  <div className="mix-row__art" aria-hidden="true">
-                    <span>{track.scale}</span>
-                  </div>
-                  <div>
-                    <p className="mix-row__title">{track.name}</p>
-                    <p className="mix-row__path">{track.path}</p>
-                    <div className="mix-row__tags">
-                      <Badge>{track.mixTag}</Badge>
-                      <Badge variant="info">{track.mood}</Badge>
+          <div className="mix-list">
+            {tracks.map((track) => {
+              const pressHandlers = createLongPressHandlers(() => handleTrackPress(track.id))
+              return (
+                <article
+                  key={track.id}
+                  className={cn('mix-row', activeTrackId === track.id && 'mix-row--active')}
+                  style={{ '--track-accent': track.accent } as CSSProperties}
+                  onClick={() => handleTrackSelect(track.id)}
+                  {...pressHandlers}
+                >
+                  <div className="mix-row__primary">
+                    <div className="mix-row__art" aria-hidden="true">
+                      <span>{track.scale}</span>
+                    </div>
+                    <div>
+                      <p className="mix-row__title">{track.name}</p>
+                      <p className="mix-row__path">{track.path}</p>
+                      <div className="mix-row__tags">
+                        <Badge>{track.mixTag}</Badge>
+                        <Badge variant="info">{track.mood}</Badge>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="mix-row__metrics">
-                  <div>
-                    <span className="metric-label">BPM</span>
-                    <span className="metric-value">{track.bpm}</span>
+                  <div className="mix-row__metrics">
+                    <div>
+                      <span className="metric-label">BPM</span>
+                      <span className="metric-value">{track.bpm}</span>
+                    </div>
+                    <div>
+                      <span className="metric-label">Scale</span>
+                      <span className="metric-value">{track.scale}</span>
+                    </div>
+                    <div>
+                      <span className="metric-label">Length</span>
+                      <span className="metric-value">{track.duration}</span>
+                    </div>
                   </div>
-                  <div>
-                    <span className="metric-label">Scale</span>
-                    <span className="metric-value">{track.scale}</span>
+                  <div className="mix-row__energy">
+                    <div className="energy-chip">Energy {track.energy}%</div>
                   </div>
-                  <div>
-                    <span className="metric-label">Length</span>
-                    <span className="metric-value">{track.duration}</span>
-                  </div>
-                </div>
-                <div className="mix-row__energy">
-                  <div className="energy-chip">Energy {track.energy}%</div>
-                </div>
-              </article>
-            )
-          })}
-        </div>
-
-        {!tracks.length && (
-          <div className="empty-state">
-            <p>No tracks in the crate yet. Sync your catalog to populate the mix.</p>
-            <Button variant="secondary" onClick={handleRefresh}>
-              Pull tracks
-            </Button>
+                </article>
+              )
+            })}
           </div>
-        )}
-      </CardContent>
 
-      <Dialog open={isCredentialDialogOpen} onClose={() => setIsCredentialDialogOpen(false)}>
-        <form className="dialog-form" onSubmit={handleCredentialSubmit}>
-          <DialogHeader>
-            <DialogTitle>Update catalog access</DialogTitle>
-            <DialogDescription>Enter the password for the zero-control catalog.</DialogDescription>
-          </DialogHeader>
-          <Label htmlFor="catalog-password">Catalog password</Label>
-          <Input
-            id="catalog-password"
-            type="password"
-            value={inputPassword}
-            onChange={(event) => setInputPassword(event.target.value)}
-            placeholder="••••••••"
-            autoComplete="current-password"
-          />
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setIsCredentialDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="submit">Authenticate</Button>
-          </DialogFooter>
-        </form>
-      </Dialog>
+          {!tracks.length && (
+            <div className="empty-state">
+              <p>No tracks in the crate yet. Sync your catalog to populate the mix.</p>
+              <Button variant="secondary" onClick={handleRefresh}>
+                Pull tracks
+              </Button>
+            </div>
+          )}
+        </CardContent>
 
-      <Dialog open={Boolean(editingTrack)} onClose={handleEditCancel}>
-        <div className="dialog-form">
-          <DialogHeader>
-            <DialogTitle>Edit track</DialogTitle>
-            {editingTrack && <DialogDescription>{editingTrack.name}</DialogDescription>}
-          </DialogHeader>
-          <div className="dialog-grid">
-            <div>
-              <Label htmlFor="edit-bpm">BPM</Label>
-              <Input
-                id="edit-bpm"
-                type="number"
-                min={60}
-                max={180}
-                value={draft?.bpm ?? ''}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          bpm: Number(event.target.value),
-                        }
-                      : previous,
-                  )
-                }
-              />
+        <Dialog open={isCredentialDialogOpen} onClose={() => setIsCredentialDialogOpen(false)}>
+          <form className="dialog-form" onSubmit={handleCredentialSubmit}>
+            <DialogHeader>
+              <DialogTitle>Update catalog access</DialogTitle>
+              <DialogDescription>Enter the password for the zero-control catalog.</DialogDescription>
+            </DialogHeader>
+            <Label htmlFor="catalog-password">Catalog password</Label>
+            <Input
+              id="catalog-password"
+              type="password"
+              value={inputPassword}
+              onChange={(event) => setInputPassword(event.target.value)}
+              placeholder="••••••••"
+              autoComplete="current-password"
+            />
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setIsCredentialDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">Authenticate</Button>
+            </DialogFooter>
+          </form>
+        </Dialog>
+
+        <Dialog open={Boolean(editingTrack)} onClose={handleEditCancel}>
+          <div className="dialog-form">
+            <DialogHeader>
+              <DialogTitle>Edit track</DialogTitle>
+              {editingTrack && <DialogDescription>{editingTrack.name}</DialogDescription>}
+            </DialogHeader>
+            <div className="dialog-grid">
+              <div>
+                <Label htmlFor="edit-bpm">BPM</Label>
+                <Input
+                  id="edit-bpm"
+                  type="number"
+                  min={60}
+                  max={180}
+                  value={draft?.bpm ?? ''}
+                  onChange={(event) =>
+                    setDraft((previous) =>
+                      previous
+                        ? {
+                            ...previous,
+                            bpm: Number(event.target.value),
+                          }
+                        : previous,
+                    )
+                  }
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-scale">Scale</Label>
+                <Input
+                  id="edit-scale"
+                  value={draft?.scale ?? ''}
+                  onChange={(event) =>
+                    setDraft((previous) =>
+                      previous
+                        ? {
+                            ...previous,
+                            scale: event.target.value,
+                          }
+                        : previous,
+                    )
+                  }
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-duration">Length</Label>
+                <Input
+                  id="edit-duration"
+                  value={draft?.duration ?? ''}
+                  onChange={(event) =>
+                    setDraft((previous) =>
+                      previous
+                        ? {
+                            ...previous,
+                            duration: event.target.value,
+                          }
+                        : previous,
+                    )
+                  }
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-tag">Tag</Label>
+                <Input
+                  id="edit-tag"
+                  value={draft?.mixTag ?? ''}
+                  onChange={(event) =>
+                    setDraft((previous) =>
+                      previous
+                        ? {
+                            ...previous,
+                            mixTag: event.target.value,
+                          }
+                        : previous,
+                    )
+                  }
+                />
+              </div>
             </div>
-            <div>
-              <Label htmlFor="edit-scale">Scale</Label>
-              <Input
-                id="edit-scale"
-                value={draft?.scale ?? ''}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          scale: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-              />
+            <DialogFooter>
+              <Button variant="ghost" onClick={handleEditCancel}>
+                Cancel
+              </Button>
+              <Button onClick={handleEditSave}>Save changes</Button>
+            </DialogFooter>
+          </div>
+        </Dialog>
+      </Card>
+
+      {activeTrack && (
+        <>
+          <button type="button" className="player-bar" onClick={togglePlayer}>
+            <div className="player-bar__art" aria-hidden="true">
+              <span>{activeTrack.scale}</span>
             </div>
-            <div>
-              <Label htmlFor="edit-duration">Length</Label>
-              <Input
-                id="edit-duration"
-                value={draft?.duration ?? ''}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          duration: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-              />
+            <div className="player-bar__meta">
+              <p className="player-bar__title">{activeTrack.name}</p>
+              <p className="player-bar__subtitle">Alive Again Sessions · {activeTrack.duration}</p>
             </div>
-            <div>
-              <Label htmlFor="edit-tag">Tag</Label>
-              <Input
-                id="edit-tag"
-                value={draft?.mixTag ?? ''}
-                onChange={(event) =>
-                  setDraft((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          mixTag: event.target.value,
-                        }
-                      : previous,
-                  )
-                }
-              />
+            <div className="player-bar__devices">
+              <span>Georgios’s AirPods Pro</span>
+            </div>
+          </button>
+
+          <div className={cn('player-drawer', isPlayerOpen && 'player-drawer--open')}>
+            <div className="player-drawer__backdrop" onClick={closePlayer} />
+            <div className="player-drawer__panel" role="dialog" aria-modal="true">
+              <div className="player-drawer__header">
+                <div className="player-source">
+                  <span className="player-source__pill">Playing from Zero Control</span>
+                  <p>{activeTrack.path}</p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={closePlayer}>
+                  Close
+                </Button>
+              </div>
+
+              <div className="player-artwork" aria-hidden="true">
+                <div className="player-artwork__texture" />
+                <span>{activeTrack.scale}</span>
+              </div>
+
+              <div className="player-track">
+                <div>
+                  <p className="player-track__title">{activeTrack.name}</p>
+                  <p className="player-track__subtitle">Guy J · Alive Again Sessions</p>
+                </div>
+                <Button variant="ghost" size="sm">
+                  ♡
+                </Button>
+              </div>
+
+              <div className="player-progress">
+                <div className="player-progress__rail">
+                  <div className="player-progress__bar" style={{ width: '42%' }} />
+                </div>
+                <div className="player-progress__timestamps">
+                  <span>0:45</span>
+                  <span>{activeTrack.duration}</span>
+                </div>
+              </div>
+
+              <div className="player-controls">
+                <Button variant="ghost" size="sm" className="player-control">
+                  🔀
+                </Button>
+                <Button variant="ghost" size="sm" className="player-control">
+                  ⏮
+                </Button>
+                <Button variant="secondary" size="lg" className="player-control player-control--primary">
+                  ▶
+                </Button>
+                <Button variant="ghost" size="sm" className="player-control">
+                  ⏭
+                </Button>
+                <Button variant="ghost" size="sm" className="player-control">
+                  🔁
+                </Button>
+              </div>
+
+              <div className="player-footer">
+                <div className="player-device">
+                  <span className="device-indicator" />
+                  Georgios’s AirPods Pro · Lossless
+                </div>
+                <div className="player-energy">Energy {activeTrack.energy}%</div>
+              </div>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={handleEditCancel}>
-              Cancel
-            </Button>
-            <Button onClick={handleEditSave}>Save changes</Button>
-          </DialogFooter>
-        </div>
-      </Dialog>
-    </Card>
+        </>
+      )}
+    </>
   )
 }
