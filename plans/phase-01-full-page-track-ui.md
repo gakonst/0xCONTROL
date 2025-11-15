@@ -23,3 +23,8 @@
 - M1: Static mock populated with fixtures to prove layout.
 - M2: Hooked up to real R2/D2 data sources with optimistic writes.
 - M3: Usability pass (keyboard shortcuts, accessible focus states).
+
+## Zero inspiration
+- Mirror the Zero playlist sample’s optimistic editing so metadata tweaks feel instant even before D2 confirms the write.
+- Adopt the sample’s approach to list virtualization and snapshot hydration to keep the full catalog scrolling smoothly.
+- Study how the Zero demos separate “mutator” logic from UI rendering to keep the React components clean and portable.

@@ -24,3 +24,8 @@
 - M1: Worker lists R2 files and writes placeholders to D2.
 - M2: Metadata extraction + enrichment with retries.
 - M3: Monitoring dashboard linked from the admin UI.
+
+## Zero inspiration
+- Bring over the Zero “Background sync” sample’s approach for reconciling worker-side mutations with client caches.
+- Use their Durable Object logging tricks to keep lightweight observability without standing up a separate service.
+- Borrow the sample cron + manual trigger duality so ops can force a re-index on demand during launches.

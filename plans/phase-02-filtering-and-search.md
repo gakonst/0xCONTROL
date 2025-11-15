@@ -23,3 +23,8 @@
 - M1: Filters wired to fixture data with optimistic UI states.
 - M2: URL serialization and shareable deep links.
 - M3: Saved view CRUD plus analytics on filter usage.
+
+## Zero inspiration
+- Use the Zero “Todo” sample’s filter pills as a reference for how to keep state in sync across tabs/devices.
+- Follow their pattern of speculative local filtering backed by background sync so results appear instantly even while queries propagate.
+- Reuse the sample’s command palette UX concepts for our Cmd+K preset switcher to stay consistent with established patterns.

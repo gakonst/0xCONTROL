@@ -28,3 +28,8 @@
 - M1: Static interactions with mock data proving gestures and layout.
 - M2: Persisted playlists with optimistic updates + conflict resolution.
 - M3: Collaboration features (shared editing, activity feed, notifications).
+
+## Zero inspiration
+- Replicate the Zero playlist sample’s swipe-to-act gestures as the baseline interaction language.
+- Leverage the sample’s conflict-free replicated data types to let multiple DJs edit the same playlist without clobbering order.
+- Study their inline activity feed pattern so collaborators can see who added which track in real time.
