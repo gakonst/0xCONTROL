@@ -23,17 +23,25 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v1
         with:
-          node-version: 20
-          cache: npm
+          bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lockb', 'bun.lock', 'package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: Build project
-        run: npm run build
+        run: bun run build
 
       - name: Deploy preview
         id: deploy_preview
@@ -43,7 +51,7 @@ jobs:
           SONG_PASSWORD: 'true'
         run: |
           set -euo pipefail
-          npx wrangler deploy --config wrangler.toml --env preview
+          bunx wrangler deploy --config wrangler.toml --env preview
 
       - name: Resolve preview URL
         id: preview_url
@@ -53,8 +61,8 @@ jobs:
           SONG_PASSWORD: 'true'
         run: |
           set -euo pipefail
-          preview_url=$(npx wrangler deployments list --config wrangler.toml --env preview --json \
-            | node <<'NODE'
+          preview_url=$(bunx wrangler deployments list --config wrangler.toml --env preview --json \
+            | bun <<'BUN'
             const fs = require('fs')
             const input = fs.readFileSync(0, 'utf8').trim()
             if (!input) {
@@ -102,7 +110,7 @@ jobs:
             if (previewUrl) {
               console.log(previewUrl)
             }
-            NODE
+            BUN
           )
           preview_url=${preview_url//$'\n'/}
           echo "preview_url=$preview_url" >> "$GITHUB_OUTPUT"
