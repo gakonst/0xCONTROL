@@ -103,6 +103,7 @@ jobs:
               console.log(previewUrl)
             }
             NODE
+          )
           preview_url=${preview_url//$'\n'/}
           echo "preview_url=$preview_url" >> "$GITHUB_OUTPUT"
 
