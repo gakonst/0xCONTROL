@@ -31,7 +31,7 @@ const DEFAULT_TRACKS: TrackRecord[] = [
 export interface Env {
   ASSETS: Fetcher
   SONG_PASSWORD: string
-  SONG_CATALOG: DurableObjectNamespace<SongCatalogDO>
+  SONG_CATALOG?: DurableObjectNamespace<SongCatalogDO>
 }
 
 const INDEX_PATH = 'index.html'
@@ -91,15 +91,8 @@ async function handleCatalogRequest(request: Request, env: Env): Promise<Respons
     }
   }
 
-  const id = env.SONG_CATALOG.idFromName(CATALOG_OBJECT_NAME)
-  const stub = env.SONG_CATALOG.get(id)
-  const response = await stub.fetch(CATALOG_DO_PATH)
+  const catalog = await loadCatalog(env)
 
-  if (!response.ok) {
-    return new Response('Failed to load catalog', { status: 502 })
-  }
-
-  const catalog = (await response.json()) as CatalogResponse
   return new Response(JSON.stringify(catalog), {
     headers: {
       'Content-Type': 'application/json',
@@ -135,5 +128,27 @@ export class SongCatalogDO implements DurableObject {
     }
 
     return new Response('Not Found', { status: 404 })
+  }
+}
+
+async function loadCatalog(env: Env): Promise<CatalogResponse> {
+  if (!env.SONG_CATALOG) {
+    return { tracks: DEFAULT_TRACKS }
+  }
+
+  try {
+    const id = env.SONG_CATALOG.idFromName(CATALOG_OBJECT_NAME)
+    const stub = env.SONG_CATALOG.get(id)
+    const response = await stub.fetch(CATALOG_DO_PATH)
+
+    if (!response.ok) {
+      console.error('Durable Object returned an error response', response.status)
+      return { tracks: DEFAULT_TRACKS }
+    }
+
+    return (await response.json()) as CatalogResponse
+  } catch (error) {
+    console.error('Failed to read catalog from Durable Object', error)
+    return { tracks: DEFAULT_TRACKS }
   }
 }
