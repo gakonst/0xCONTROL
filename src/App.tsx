@@ -2,6 +2,9 @@ import { useCallback } from 'react'
 import type { Connector } from 'wagmi'
 import { useAccount, useConnect, useDisconnect } from 'wagmi'
 
+import { Badge } from './components/ui/badge'
+import { Button } from './components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card'
 import { SongCatalog } from './components/SongCatalog'
 import { WalletStatus } from './components/WalletStatus'
 
@@ -35,42 +38,57 @@ function App() {
   )
 
   return (
-    <main className="app">
-      <header className="app__header">
-        <h1>Zero Control Dashboard</h1>
-        <p className="app__subtitle">
-          Connect your wallet to explore the zero-control PID controller smart contracts.
-        </p>
-      </header>
-
-      <section className="card">
-        <h2 className="card__title">Wallet Connection</h2>
-        {isConnected ? (
-          <button className="button button--secondary" onClick={() => disconnect()}>
-            Disconnect
-          </button>
-        ) : (
-          <div className="button-grid">
-            {connectors.map((connector) => (
-              <button
-                key={connector.id}
-                className="button"
-                disabled={!connector.ready || isConnecting}
-                onClick={() => handleConnect(connector)}
-              >
-                {connector.name}
-                {!connector.ready && ' (unsupported)'}
-                {isConnecting && isConnectorPending(connector) && '…'}
-              </button>
-            ))}
+    <div className="page">
+      <div className="app-shell">
+        <header className="hero">
+          <div>
+            <p className="eyebrow">Zero Control</p>
+            <h1>Mix intelligence</h1>
+            <p className="hero__subtitle">Curate on-chain crates with the same polish as your favorite music apps.</p>
           </div>
-        )}
-        {error && <p className="error">{error.message}</p>}
-      </section>
+          <div className="hero__actions">
+            <Badge variant="outline">{connectors.length} wallet options</Badge>
+            <Button variant="outline">Share crate</Button>
+          </div>
+        </header>
 
-      <WalletStatus />
-      <SongCatalog />
-    </main>
+        <div className="app-grid">
+          <Card className="panel-card">
+            <CardHeader>
+              <CardTitle>Wallet connection</CardTitle>
+              <CardDescription>Pick a connector to sync your account with the dashboard.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isConnected ? (
+                <Button variant="ghost" onClick={() => disconnect()} className="w-full">
+                  Disconnect wallet
+                </Button>
+              ) : (
+                <div className="connector-grid">
+                  {connectors.map((connector) => (
+                    <Button
+                      key={connector.id}
+                      onClick={() => handleConnect(connector)}
+                      disabled={!connector.ready || isConnecting}
+                      variant="secondary"
+                    >
+                      {connector.name}
+                      {!connector.ready && ' (unsupported)'}
+                      {isConnecting && isConnectorPending(connector) && '…'}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              {error && <p className="inline-error">{error.message}</p>}
+            </CardContent>
+          </Card>
+
+          <WalletStatus />
+        </div>
+
+        <SongCatalog />
+      </div>
+    </div>
   )
 }
 
