@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev:worker": "wrangler dev",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "deploy": "bun run build && bunx wrangler deploy"
   },
@@ -23,6 +24,6 @@
     "typescript": "^5.3.3",
     "vite": "^5.1.4",
     "@cloudflare/workers-types": "^4.20240512.0",
-    "wrangler": "^3.53.1"
+    "wrangler": "4"
   }
 }
