@@ -5,7 +5,7 @@ import { useAccount, useConnect, useDisconnect } from 'wagmi'
 import { Badge } from './components/ui/badge'
 import { Button } from './components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card'
-import { SongCatalog } from './components/SongCatalog'
+import { PlaylistView } from './components/PlaylistView'
 import { WalletStatus } from './components/WalletStatus'
 
 function App() {
@@ -86,7 +86,7 @@ function App() {
           <WalletStatus />
         </div>
 
-        <SongCatalog />
+        <PlaylistView />
       </div>
     </div>
   )
