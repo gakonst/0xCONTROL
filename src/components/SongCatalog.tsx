@@ -66,6 +66,26 @@ function decorateTracks(records: TrackRecord[]): EnhancedTrack[] {
   }))
 }
 
+function TrackStatStack({
+  track,
+  className,
+}: {
+  track: EnhancedTrack
+  className?: string
+}) {
+  return (
+    <div className={cn('track-stack', className)}>
+      <span className="track-stack__item">{track.bpm} BPM</span>
+      <span className="track-stack__item">{track.duration}</span>
+      <span className="track-stack__item">{track.scale}</span>
+      <span className="track-stack__item track-stack__item--color">
+        <span className="track-stack__swatch" style={{ backgroundColor: track.accent }} aria-hidden="true" />
+        <span className="track-stack__swatch-label">{track.accent.toUpperCase()}</span>
+      </span>
+    </div>
+  )
+}
+
 function createLongPressHandlers(callback: () => void, delay = 550) {
   let timer: number | null = null
 
@@ -280,10 +300,9 @@ export function SongCatalog() {
             <div className="mix-list__header">
               <span>#</span>
               <span>Title</span>
-              <span>Tag</span>
-              <span>Mood</span>
-              <span>Energy</span>
-              <span className="mix-list__duration">Length</span>
+              <span>Album</span>
+              <span>Date added</span>
+              <span className="mix-list__stats">Stats</span>
             </div>
 
             {tracks.map((track, index) => {
@@ -314,25 +333,18 @@ export function SongCatalog() {
                       <p className="mix-row__meta">
                         <span>{track.artist}</span>
                         <span className="mix-row__dot" aria-hidden="true" />
-                        <span>{track.album}</span>
+                        <span>{track.mixTag}</span>
                       </p>
                     </div>
                   </div>
-                  <div className="mix-row__tag">
-                    <Badge>{track.mixTag}</Badge>
-                    <span className="mix-row__path">{track.dateAdded}</span>
+                  <div className="mix-row__album">
+                    <p>{track.album}</p>
+                    <span>{track.mood}</span>
                   </div>
-                  <div className="mix-row__mood">
-                    <Badge variant="info">{track.mood}</Badge>
-                    <span className="mix-row__path">{track.scale}</span>
+                  <div className="mix-row__date">{track.dateAdded}</div>
+                  <div className="mix-row__stats">
+                    <TrackStatStack track={track} />
                   </div>
-                  <div className="mix-row__energy">
-                    <div className="energy-pill">
-                      <span style={{ width: `${track.energy}%` }} />
-                      <span className="energy-pill__value">{track.energy}%</span>
-                    </div>
-                  </div>
-                  <div className="mix-row__duration">{track.duration}</div>
                 </article>
               )
             })}
@@ -464,23 +476,24 @@ export function SongCatalog() {
       {activeTrack && (
         <>
           <button type="button" className="player-bar" onClick={togglePlayer}>
-            <div className="player-bar__main">
-              <div className="player-bar__art" aria-hidden="true">
-                <span>{activeTrack.scale}</span>
-              </div>
-              <div className="player-bar__meta">
-                <p className="player-bar__title">{activeTrack.name}</p>
-                <p className="player-bar__subtitle">{activeTrack.artist} · {activeTrack.album}</p>
-              </div>
+            <div className="player-bar__art" aria-hidden="true">
+              <span>{activeTrack.scale}</span>
             </div>
-            <div className="player-bar__controls" aria-hidden="true">
-              <span>⏮</span>
+            <div className="player-bar__details">
+              <p className="player-bar__title">{activeTrack.name}</p>
+              <p className="player-bar__subtitle">
+                {activeTrack.artist}
+                <span className="player-bar__dot" aria-hidden="true" />
+                <span className="player-bar__lossless">Lossless</span>
+              </p>
+              <TrackStatStack track={activeTrack} className="track-stack--player" />
+            </div>
+            <div className="player-bar__cta" aria-hidden="true">
+              <div className="player-bar__device">
+                <span className="player-bar__device-icon" />
+                <span>Studio booth</span>
+              </div>
               <span className="player-bar__play">▶</span>
-              <span>⏭</span>
-            </div>
-            <div className="player-bar__devices">
-              <span className="device-indicator" />
-              <span>Georgios’s AirPods Pro</span>
             </div>
           </button>
 
