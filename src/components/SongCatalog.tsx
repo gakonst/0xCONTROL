@@ -26,6 +26,9 @@ type EnhancedTrack = TrackRecord & {
   mixTag: string
   accent: string
   mood: string
+  artist: string
+  album: string
+  dateAdded: string
 }
 
 type EditableTrackFields = Pick<EnhancedTrack, 'bpm' | 'scale' | 'duration' | 'mixTag'>
@@ -43,6 +46,9 @@ const DURATIONS = ['2:54', '3:12', '4:03', '5:21', '3:48', '2:41']
 const TAGS = ['Texture Blend', 'Vocal Layer', 'Percussive', 'Peak Energy', 'Leftfield']
 const MOODS = ['Neon Pulse', 'Afterhours', 'Deep Haze', 'Heatwave', 'Low End', 'Skyline']
 const ACCENTS = ['#f472b6', '#34d399', '#fbbf24', '#60a5fa', '#c084fc', '#f97316']
+const ARTISTS = ['Monkey Safari', 'Sinnco, Millero', 'Sabb, Forrest, Santez', 'Musumeci, Dodi Palese', 'Trikk', 'Guy J']
+const ALBUMS = ['Zero Control Sessions', 'Alive Again', 'Night Swim', 'Club Pulse', 'Pulsewaves', 'Sky Machines']
+const DATES = ['1 day ago', '2 days ago', '3 days ago', 'Last week', '2 weeks ago', 'Last month']
 
 function decorateTracks(records: TrackRecord[]): EnhancedTrack[] {
   return records.map((track, index) => ({
@@ -54,6 +60,9 @@ function decorateTracks(records: TrackRecord[]): EnhancedTrack[] {
     mixTag: TAGS[index % TAGS.length],
     accent: ACCENTS[index % ACCENTS.length],
     mood: MOODS[index % MOODS.length],
+    artist: ARTISTS[index % ARTISTS.length],
+    album: ALBUMS[index % ALBUMS.length],
+    dateAdded: DATES[index % DATES.length],
   }))
 }
 
@@ -268,46 +277,62 @@ export function SongCatalog() {
           </div>
 
           <div className="mix-list">
-            {tracks.map((track) => {
+            <div className="mix-list__header">
+              <span>#</span>
+              <span>Title</span>
+              <span>Tag</span>
+              <span>Mood</span>
+              <span>Energy</span>
+              <span className="mix-list__duration">Length</span>
+            </div>
+
+            {tracks.map((track, index) => {
               const pressHandlers = createLongPressHandlers(() => handleTrackPress(track.id))
               return (
                 <article
                   key={track.id}
-                  className={cn('mix-row', activeTrackId === track.id && 'mix-row--active')}
+                  className={cn('mix-row mix-row--table', activeTrackId === track.id && 'mix-row--active')}
                   style={{ '--track-accent': track.accent } as CSSProperties}
                   onClick={() => handleTrackSelect(track.id)}
                   {...pressHandlers}
                 >
+                  <div className="mix-row__index" aria-hidden="true">
+                    {activeTrackId === track.id ? (
+                      <span className="mix-row__equalizer">
+                        <span />
+                      </span>
+                    ) : (
+                      index + 1
+                    )}
+                  </div>
                   <div className="mix-row__primary">
                     <div className="mix-row__art" aria-hidden="true">
                       <span>{track.scale}</span>
                     </div>
                     <div>
                       <p className="mix-row__title">{track.name}</p>
-                      <p className="mix-row__path">{track.path}</p>
-                      <div className="mix-row__tags">
-                        <Badge>{track.mixTag}</Badge>
-                        <Badge variant="info">{track.mood}</Badge>
-                      </div>
+                      <p className="mix-row__meta">
+                        <span>{track.artist}</span>
+                        <span className="mix-row__dot" aria-hidden="true" />
+                        <span>{track.album}</span>
+                      </p>
                     </div>
                   </div>
-                  <div className="mix-row__metrics">
-                    <div>
-                      <span className="metric-label">BPM</span>
-                      <span className="metric-value">{track.bpm}</span>
-                    </div>
-                    <div>
-                      <span className="metric-label">Scale</span>
-                      <span className="metric-value">{track.scale}</span>
-                    </div>
-                    <div>
-                      <span className="metric-label">Length</span>
-                      <span className="metric-value">{track.duration}</span>
-                    </div>
+                  <div className="mix-row__tag">
+                    <Badge>{track.mixTag}</Badge>
+                    <span className="mix-row__path">{track.dateAdded}</span>
+                  </div>
+                  <div className="mix-row__mood">
+                    <Badge variant="info">{track.mood}</Badge>
+                    <span className="mix-row__path">{track.scale}</span>
                   </div>
                   <div className="mix-row__energy">
-                    <div className="energy-chip">Energy {track.energy}%</div>
+                    <div className="energy-pill">
+                      <span style={{ width: `${track.energy}%` }} />
+                      <span className="energy-pill__value">{track.energy}%</span>
+                    </div>
                   </div>
+                  <div className="mix-row__duration">{track.duration}</div>
                 </article>
               )
             })}
@@ -439,14 +464,22 @@ export function SongCatalog() {
       {activeTrack && (
         <>
           <button type="button" className="player-bar" onClick={togglePlayer}>
-            <div className="player-bar__art" aria-hidden="true">
-              <span>{activeTrack.scale}</span>
+            <div className="player-bar__main">
+              <div className="player-bar__art" aria-hidden="true">
+                <span>{activeTrack.scale}</span>
+              </div>
+              <div className="player-bar__meta">
+                <p className="player-bar__title">{activeTrack.name}</p>
+                <p className="player-bar__subtitle">{activeTrack.artist} · {activeTrack.album}</p>
+              </div>
             </div>
-            <div className="player-bar__meta">
-              <p className="player-bar__title">{activeTrack.name}</p>
-              <p className="player-bar__subtitle">Alive Again Sessions · {activeTrack.duration}</p>
+            <div className="player-bar__controls" aria-hidden="true">
+              <span>⏮</span>
+              <span className="player-bar__play">▶</span>
+              <span>⏭</span>
             </div>
             <div className="player-bar__devices">
+              <span className="device-indicator" />
               <span>Georgios’s AirPods Pro</span>
             </div>
           </button>
