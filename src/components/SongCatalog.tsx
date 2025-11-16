@@ -43,6 +43,8 @@ const DURATIONS = ['2:54', '3:12', '4:03', '5:21', '3:48', '2:41']
 const TAGS = ['Texture Blend', 'Vocal Layer', 'Percussive', 'Peak Energy', 'Leftfield']
 const MOODS = ['Neon Pulse', 'Afterhours', 'Deep Haze', 'Heatwave', 'Low End', 'Skyline']
 const ACCENTS = ['#f472b6', '#34d399', '#fbbf24', '#60a5fa', '#c084fc', '#f97316']
+const PLAYLIST_TITLE = 'gak dance'
+const PLAYLIST_OWNER = 'georgegak'
 
 function decorateTracks(records: TrackRecord[]): EnhancedTrack[] {
   return records.map((track, index) => ({
@@ -231,86 +233,117 @@ export function SongCatalog() {
 
   return (
     <>
-      <Card className="mix-card" variant="translucent">
-        <CardContent>
-          <div className="mix-card__top">
-            <div>
-              <p className="eyebrow">Mix mode</p>
-              <h2 className="mix-card__title">Zero Control Sessions</h2>
-              <p className="mix-card__subtitle">
-                Real-time crates curated from your R2 catalog. Long-press a song tile to fine-tune BPM, key or tag.
-              </p>
-              <div className="mix-card__stats">
-                <Badge variant="outline">{tracks.length} tracks</Badge>
-                <Badge variant="outline">Avg {averageBpm} BPM</Badge>
-                <Badge variant="outline">Peak energy {peakEnergy}%</Badge>
-              </div>
+      <Card className="playlist-card" variant="translucent">
+        <div className="playlist-hero">
+          <div className="playlist-hero__art" aria-hidden="true">
+            <div className="playlist-hero__texture" />
+            <span>mix</span>
+          </div>
+          <div className="playlist-hero__meta">
+            <p className="playlist-hero__eyebrow">Zero Control sessions</p>
+            <h2 className="playlist-hero__title">{PLAYLIST_TITLE}</h2>
+            <p className="playlist-hero__subtitle">
+              Real-time crates pulled from your R2 catalog. Long-press any row to fine-tune BPM, key, or tags without
+              leaving the flow.
+            </p>
+            <div className="playlist-hero__stats">
+              <span>
+                <strong>{PLAYLIST_OWNER}</strong> · {tracks.length} tracks · Avg {averageBpm} BPM
+              </span>
+              <span>Peak energy {peakEnergy}%</span>
             </div>
-            <div className="mix-card__actions">
-              <Button variant="secondary" onClick={handleRefresh} disabled={isLoading}>
+          </div>
+        </div>
+        <CardContent className="playlist-content">
+          <div className="playlist-controls">
+            <div className="playlist-controls__primary">
+              <Button className="playlist-play" aria-label="Play playlist">
+                ▶
+              </Button>
+              <Button variant="ghost" size="sm" className="playlist-icon" aria-label="Save playlist">
+                ♡
+              </Button>
+              <Button variant="ghost" size="sm" className="playlist-icon" aria-label="Playlist options">
+                ⋯
+              </Button>
+            </div>
+            <div className="playlist-controls__secondary">
+              <Button variant="secondary" size="sm" onClick={handleRefresh} disabled={isLoading}>
                 {isLoading ? 'Syncing…' : 'Sync catalog'}
               </Button>
-              <Button variant="ghost" onClick={() => setIsCredentialDialogOpen(true)}>
+              <Button variant="ghost" size="sm" onClick={() => setIsCredentialDialogOpen(true)}>
                 Update credential
               </Button>
             </div>
           </div>
 
-          {error && <p className="mix-card__error">{error}</p>}
+          {error && <p className="playlist-error">{error}</p>}
 
-          <div className="mix-legend">
-            <p>Hold to edit · Release to keep playing</p>
-            <div className="mix-legend__chips">
+          <div className="playlist-hint">
+            <p>Hold a track row to edit metadata · Release to keep playing</p>
+            <div className="playlist-hint__swatches">
               {ACCENTS.slice(0, 3).map((color) => (
-                <span key={color} className="mix-legend__chip" style={{ backgroundColor: color }} />
+                <span key={color} className="playlist-hint__swatch" style={{ backgroundColor: color }} />
               ))}
             </div>
           </div>
 
-          <div className="mix-list">
-            {tracks.map((track) => {
-              const pressHandlers = createLongPressHandlers(() => handleTrackPress(track.id))
-              return (
-                <article
-                  key={track.id}
-                  className={cn('mix-row', activeTrackId === track.id && 'mix-row--active')}
-                  style={{ '--track-accent': track.accent } as CSSProperties}
-                  onClick={() => handleTrackSelect(track.id)}
-                  {...pressHandlers}
-                >
-                  <div className="mix-row__primary">
-                    <div className="mix-row__art" aria-hidden="true">
-                      <span>{track.scale}</span>
+          <div className="playlist-table" role="table" aria-label="Tracklist">
+            <div className="playlist-table__header" role="row">
+              <span>#</span>
+              <span>Title</span>
+              <span>BPM</span>
+              <span>Key</span>
+              <span className="playlist-table__col--energy">Energy</span>
+              <span>Length</span>
+            </div>
+            <div className="playlist-table__body" role="rowgroup">
+              {tracks.map((track, index) => {
+                const pressHandlers = createLongPressHandlers(() => handleTrackPress(track.id))
+                return (
+                  <article
+                    key={track.id}
+                    role="row"
+                    className={cn('playlist-row', activeTrackId === track.id && 'playlist-row--active')}
+                    style={{ '--track-accent': track.accent } as CSSProperties}
+                    onClick={() => handleTrackSelect(track.id)}
+                    {...pressHandlers}
+                  >
+                    <div className="playlist-row__index" aria-hidden="true">
+                      {activeTrackId === track.id ? <span className="playlist-row__playing" /> : index + 1}
                     </div>
-                    <div>
-                      <p className="mix-row__title">{track.name}</p>
-                      <p className="mix-row__path">{track.path}</p>
-                      <div className="mix-row__tags">
-                        <Badge>{track.mixTag}</Badge>
-                        <Badge variant="info">{track.mood}</Badge>
+                    <div className="playlist-row__track">
+                      <div className="playlist-row__art" aria-hidden="true">
+                        <span>{track.scale}</span>
+                      </div>
+                      <div>
+                        <p className="playlist-row__title">{track.name}</p>
+                        <p className="playlist-row__path">{track.path}</p>
+                        <div className="playlist-row__tags">
+                          <Badge variant="outline">{track.mixTag}</Badge>
+                          <Badge variant="info">{track.mood}</Badge>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="mix-row__metrics">
-                    <div>
-                      <span className="metric-label">BPM</span>
+                    <div className="playlist-row__metric playlist-row__metric--bpm">
                       <span className="metric-value">{track.bpm}</span>
+                      <span className="metric-label">BPM</span>
                     </div>
-                    <div>
-                      <span className="metric-label">Scale</span>
+                    <div className="playlist-row__metric playlist-row__metric--key">
                       <span className="metric-value">{track.scale}</span>
+                      <span className="metric-label">Key</span>
                     </div>
-                    <div>
-                      <span className="metric-label">Length</span>
+                    <div className="playlist-row__metric playlist-row__metric--energy">
+                      <span className="metric-value">{track.energy}%</span>
+                      <span className="metric-label">Energy</span>
+                    </div>
+                    <div className="playlist-row__metric playlist-row__metric--length">
                       <span className="metric-value">{track.duration}</span>
                     </div>
-                  </div>
-                  <div className="mix-row__energy">
-                    <div className="energy-chip">Energy {track.energy}%</div>
-                  </div>
-                </article>
-              )
-            })}
+                  </article>
+                )
+              })}
+            </div>
           </div>
 
           {!tracks.length && (
