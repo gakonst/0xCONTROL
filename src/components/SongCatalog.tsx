@@ -1,6 +1,5 @@
 import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 
-import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Card, CardContent } from './ui/card'
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
@@ -288,62 +287,35 @@ export function SongCatalog() {
             </div>
           </div>
 
-          <div className="playlist-table" role="table" aria-label="Tracklist">
-            <div className="playlist-table__header" role="row">
-              <span>#</span>
-              <span>Title</span>
-              <span>BPM</span>
-              <span>Key</span>
-              <span className="playlist-table__col--energy">Energy</span>
-              <span>Length</span>
-            </div>
-            <div className="playlist-table__body" role="rowgroup">
-              {tracks.map((track, index) => {
-                const pressHandlers = createLongPressHandlers(() => handleTrackPress(track.id))
-                return (
-                  <article
-                    key={track.id}
-                    role="row"
-                    className={cn('playlist-row', activeTrackId === track.id && 'playlist-row--active')}
-                    style={{ '--track-accent': track.accent } as CSSProperties}
-                    onClick={() => handleTrackSelect(track.id)}
-                    {...pressHandlers}
-                  >
-                    <div className="playlist-row__index" aria-hidden="true">
-                      {activeTrackId === track.id ? <span className="playlist-row__playing" /> : index + 1}
+          <div className="mix-list" role="list" aria-label="Tracklist">
+            {tracks.map((track) => {
+              const pressHandlers = createLongPressHandlers(() => handleTrackPress(track.id))
+              return (
+                <article
+                  key={track.id}
+                  role="listitem"
+                  className={cn('mix-row', activeTrackId === track.id && 'mix-row--active')}
+                  style={{ '--track-accent': track.accent } as CSSProperties}
+                  onClick={() => handleTrackSelect(track.id)}
+                  {...pressHandlers}
+                >
+                  <div className="mix-row__left">
+                    <div className="mix-row__thumb" aria-hidden="true">
+                      <span>{track.name.slice(0, 1)}</span>
                     </div>
-                    <div className="playlist-row__track">
-                      <div className="playlist-row__art" aria-hidden="true">
-                        <span>{track.scale}</span>
-                      </div>
-                      <div>
-                        <p className="playlist-row__title">{track.name}</p>
-                        <p className="playlist-row__path">{track.path}</p>
-                        <div className="playlist-row__tags">
-                          <Badge variant="outline">{track.mixTag}</Badge>
-                          <Badge variant="info">{track.mood}</Badge>
-                        </div>
-                      </div>
+                    <div className="mix-row__text">
+                      <p className="mix-row__title">{track.name}</p>
+                      <p className="mix-row__artist">{track.path}</p>
                     </div>
-                    <div className="playlist-row__metric playlist-row__metric--bpm">
-                      <span className="metric-value">{track.bpm}</span>
-                      <span className="metric-label">BPM</span>
-                    </div>
-                    <div className="playlist-row__metric playlist-row__metric--key">
-                      <span className="metric-value">{track.scale}</span>
-                      <span className="metric-label">Key</span>
-                    </div>
-                    <div className="playlist-row__metric playlist-row__metric--energy">
-                      <span className="metric-value">{track.energy}%</span>
-                      <span className="metric-label">Energy</span>
-                    </div>
-                    <div className="playlist-row__metric playlist-row__metric--length">
-                      <span className="metric-value">{track.duration}</span>
-                    </div>
-                  </article>
-                )
-              })}
-            </div>
+                  </div>
+                  <div className="mix-row__right">
+                    <span className="mix-row__scale">{track.scale}</span>
+                    <span className="mix-row__duration">{track.duration}</span>
+                    <span className="mix-row__color" aria-label="Track color" />
+                  </div>
+                </article>
+              )
+            })}
           </div>
 
           {!tracks.length && (
