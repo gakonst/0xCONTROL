@@ -16,5 +16,9 @@ SONG_PASSWORD = "true"
 [env.preview]
 name = "zero-control-dapp-preview"
 
+[[env.preview.r2_buckets]]
+binding = "TRACKS_BUCKET"
+bucket_name = "zero-control-tracks"
+
 [env.preview.vars]
 SONG_PASSWORD = "true"
