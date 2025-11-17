@@ -108,7 +108,7 @@ export function TrackList({
         className,
       )}
     >
-      <header className="px-5 py-4 md:px-6">
+      <header className="px-3.5 py-4 md:px-5">
         <div className="flex flex-col gap-1">
           <h1 className="text-base font-semibold uppercase tracking-[0.12rem] text-foreground md:text-lg">
             Control Room

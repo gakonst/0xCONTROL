@@ -398,7 +398,7 @@ function App() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#010308] text-foreground">
-      <div className="flex flex-1 flex-col overflow-hidden px-4 pt-4">
+      <div className="flex flex-1 flex-col overflow-hidden pt-4">
         <div className="min-h-0 flex-1">
           <TrackList
             className="h-full w-full"
@@ -410,7 +410,7 @@ function App() {
       </div>
 
       {currentTrack && (
-        <div className="flex flex-col px-4 pb-2 shrink-0">
+        <div className="flex flex-col pb-2 shrink-0">
           <TrackNotesEditor
             track={currentTrack}
             annotation={currentAnnotation}
