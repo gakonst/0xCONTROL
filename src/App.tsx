@@ -49,6 +49,8 @@ function App() {
         <PlayerBar
           track={currentTrack}
           isPlaying={isPlaying}
+          isBuffering={false}
+          elapsedSeconds={0}
           onTogglePlay={() => setIsPlaying((prev) => !prev)}
           onSkipNext={goToNextTrack}
           onSkipPrevious={goToPreviousTrack}

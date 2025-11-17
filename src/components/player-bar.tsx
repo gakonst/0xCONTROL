@@ -25,7 +25,17 @@ export function PlayerBar({
   onSkipNext,
   onSkipPrevious,
 }: PlayerBarProps) {
-  const safeDuration = durationSeconds ?? track.durationSeconds ?? 0;
+  const parseDurationToSeconds = (duration?: string) => {
+    if (!duration) return 0;
+    const parts = duration.split(":").map((value) => Number(value) || 0);
+    if (parts.length === 2) {
+      const [minutes, seconds] = parts;
+      return minutes * 60 + seconds;
+    }
+    return 0;
+  };
+
+  const safeDuration = durationSeconds ?? parseDurationToSeconds(track.duration);
   const progress =
     safeDuration > 0 ? Math.min(elapsedSeconds / safeDuration, 1) : 0;
   const swipeStartRef = useRef<number | null>(null);
