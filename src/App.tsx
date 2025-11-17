@@ -1,13 +1,27 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { PlayerBar } from "@/components/player-bar";
+import { FullScreenPlayer } from "@/components/fullscreen-player";
 import { TrackList } from "@/components/track-list";
-import { fetchCatalogTracks } from "@/data/tracks";
+import { TrackNotesEditor } from "@/components/track-notes-editor";
+import { fetchCatalogTracks, getTrackUrl, type Track } from "@/data/tracks";
+import { useMediaSession } from "@/hooks/use-media-session";
+import type { TrackAnnotation } from "@/types/annotations";
 
 function App() {
   const [currentTrackId, setCurrentTrackId] = useState("");
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
+  const [isFullScreenPlayerOpen, setIsFullScreenPlayerOpen] = useState(false);
+  const [annotations, setAnnotations] = useState<
+    Record<string, TrackAnnotation>
+  >({});
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const trackUrlRef = useRef<string>("");
 
   const { data: tracks = [] } = useQuery({
     queryKey: ["catalog"],
@@ -31,49 +45,316 @@ function App() {
   }, [tracks, currentTrackId]);
 
   const currentTrack = useMemo(
-    () =>
-      tracks.find((track) => track.id === currentTrackId) ?? tracks[0],
+    () => tracks.find((track) => track.id === currentTrackId) ?? tracks[0],
     [currentTrackId, tracks],
   );
+  const currentAnnotation = currentTrack
+    ? annotations[currentTrack.id]
+    : undefined;
 
-  const goToNextTrack = () => {
-    if (!currentTrack || tracks.length === 0) return;
-    const index = tracks.findIndex((track) => track.id === currentTrack.id);
-    const nextTrack = tracks[(index + 1) % tracks.length];
-    setCurrentTrackId(nextTrack.id);
+  const goToTrackByOffset = useCallback(
+    (offset: number) => {
+      if (!currentTrack || tracks.length === 0) return;
+      const index = tracks.findIndex((track) => track.id === currentTrack.id);
+      if (index === -1) return;
+      const nextTrack =
+        tracks[(index + offset + tracks.length) % tracks.length];
+      setCurrentTrackId(nextTrack.id);
+    },
+    [currentTrack, tracks],
+  );
+
+  const goToNextTrack = useCallback(() => {
+    goToTrackByOffset(1);
+  }, [goToTrackByOffset]);
+
+  const goToPreviousTrack = useCallback(() => {
+    goToTrackByOffset(-1);
+  }, [goToTrackByOffset]);
+
+  const goToNextTrackRef = useRef(goToNextTrack);
+  useEffect(() => {
+    goToNextTrackRef.current = goToNextTrack;
+  }, [goToNextTrack]);
+
+  useEffect(() => {
+    if (!audioRef.current) {
+      const audio = new Audio();
+      audio.preload = "auto";
+      audioRef.current = audio;
+    }
+
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleTimeUpdate = () => {
+      setElapsedSeconds(audio.currentTime);
+    };
+    const handleLoadedMetadata = () => {
+      const duration = Number.isFinite(audio.duration) ? audio.duration : null;
+      setDurationSeconds(duration);
+      setIsBuffering(false);
+    };
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => {
+      if (audio.ended) return;
+      setIsPlaying(false);
+    };
+    const handleWaiting = () => setIsBuffering(true);
+    const handlePlaying = () => setIsBuffering(false);
+    const handleEnded = () => {
+      goToNextTrackRef.current();
+      setIsPlaying(true);
+    };
+
+    audio.addEventListener("timeupdate", handleTimeUpdate);
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+    audio.addEventListener("play", handlePlay);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("waiting", handleWaiting);
+    audio.addEventListener("playing", handlePlaying);
+    audio.addEventListener("ended", handleEnded);
+
+    return () => {
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
+      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      audio.removeEventListener("play", handlePlay);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("waiting", handleWaiting);
+      audio.removeEventListener("playing", handlePlaying);
+      audio.removeEventListener("ended", handleEnded);
+    };
+  }, []);
+
+  useEffect(
+    () => () => {
+      audioRef.current?.pause();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!currentTrackId || !currentTrack) return;
+
+    const ensureAudio = () => {
+      if (!audioRef.current) {
+        const audio = new Audio();
+        audio.preload = "auto";
+        audioRef.current = audio;
+      }
+      return audioRef.current;
+    };
+
+    const audio = ensureAudio();
+    if (!audio) return;
+
+    const trackUrl = getTrackUrl(currentTrack.id);
+    if (trackUrlRef.current !== trackUrl) {
+      trackUrlRef.current = trackUrl;
+      setIsBuffering(true);
+      setElapsedSeconds(0);
+      setDurationSeconds(null);
+      audio.src = trackUrl;
+      audio.load();
+    }
+
+    if (isPlaying) {
+      const playPromise = audio.play();
+      if (playPromise) {
+        playPromise.catch((error) => {
+          console.error("Unable to start playback", error);
+          setIsPlaying(false);
+        });
+      }
+    } else {
+      audio.pause();
+    }
+  }, [currentTrack, currentTrackId, isPlaying]);
+
+  const handleTogglePlay = () => {
+    setIsPlaying((prev) => !prev);
   };
 
-  const goToPreviousTrack = () => {
-    if (!currentTrack || tracks.length === 0) return;
-    const index = tracks.findIndex((track) => track.id === currentTrack.id);
-    const previousTrack =
-      tracks[(index - 1 + tracks.length) % tracks.length];
-    setCurrentTrackId(previousTrack.id);
-  };
+  const handlePlayRequest = useCallback(() => {
+    setIsPlaying(true);
+  }, []);
+
+  const handlePauseRequest = useCallback(() => {
+    setIsPlaying(false);
+  }, []);
+
+  const seekBy = useCallback((deltaSeconds: number) => {
+    const audio = audioRef.current;
+    if (!audio || Number.isNaN(deltaSeconds)) return;
+
+    const duration =
+      Number.isFinite(audio.duration) && audio.duration > 0
+        ? audio.duration
+        : undefined;
+
+    const nextTime = Math.max(0, audio.currentTime + deltaSeconds);
+    audio.currentTime =
+      duration !== undefined ? Math.min(nextTime, duration) : nextTime;
+  }, []);
+
+  const handleSeekForward = useCallback(
+    (offset = 10) => {
+      seekBy(Math.abs(offset));
+    },
+    [seekBy],
+  );
+
+  const handleSeekBackward = useCallback(
+    (offset = 10) => {
+      seekBy(-Math.abs(offset));
+    },
+    [seekBy],
+  );
+
+  const handleSeekToPosition = useCallback((position: number) => {
+    const audio = audioRef.current;
+    if (!audio || typeof position !== "number" || Number.isNaN(position)) {
+      return;
+    }
+
+    const duration =
+      Number.isFinite(audio.duration) && audio.duration > 0
+        ? audio.duration
+        : undefined;
+    const nextTime = Math.max(0, position);
+    audio.currentTime =
+      duration !== undefined ? Math.min(nextTime, duration) : nextTime;
+  }, []);
+
+  const handleSeek = useCallback((nextSeconds: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const duration = Number.isFinite(audio.duration) ? audio.duration : null;
+    const safeTarget = (() => {
+      if (duration && duration > 0) {
+        return Math.min(Math.max(nextSeconds, 0), duration);
+      }
+      return Math.max(nextSeconds, 0);
+    })();
+    audio.currentTime = safeTarget;
+    setElapsedSeconds(safeTarget);
+  }, []);
+
+  const handleAnnotationChange = useCallback(
+    (partial: Partial<TrackAnnotation>) => {
+      if (!currentTrack) return;
+      const trackId = currentTrack.id;
+      setAnnotations((previous) => {
+        const currentValue = previous[trackId] ?? {};
+        const updated: TrackAnnotation = { ...currentValue };
+
+        if ("color" in partial) {
+          const nextColor = partial.color ?? null;
+          if (nextColor) {
+            updated.color = nextColor;
+          } else {
+            delete updated.color;
+          }
+        }
+
+        if ("note" in partial) {
+          const nextNote = partial.note ?? "";
+          if (nextNote.length > 0) {
+            updated.note = nextNote;
+          } else {
+            delete updated.note;
+          }
+        }
+
+        const hasColor = "color" in updated;
+        const hasNote = "note" in updated;
+
+        if (!hasColor && !hasNote) {
+          if (!(trackId in previous)) {
+            return previous;
+          }
+          const { [trackId]: _removed, ...rest } = previous;
+          return rest;
+        }
+
+        return {
+          ...previous,
+          [trackId]: updated,
+        };
+      });
+    },
+    [currentTrack],
+  );
+
+  const handleTrackSelect = useCallback((track: Track) => {
+    setCurrentTrackId(track.id);
+    setIsPlaying(true);
+    setIsFullScreenPlayerOpen(false);
+  }, []);
+
+  const handleOpenFullScreen = useCallback(() => {
+    setIsFullScreenPlayerOpen(true);
+  }, []);
+
+  useMediaSession({
+    track: currentTrack,
+    isPlaying,
+    elapsedSeconds,
+    durationSeconds,
+    onPlayRequest: handlePlayRequest,
+    onPauseRequest: handlePauseRequest,
+    onSkipNext: goToNextTrack,
+    onSkipPrevious: goToPreviousTrack,
+    onSeekBackward: handleSeekBackward,
+    onSeekForward: handleSeekForward,
+    onSeekTo: handleSeekToPosition,
+  });
 
   return (
-    <div className="relative h-screen overflow-hidden bg-[#010308] text-foreground">
-      <div className="flex h-screen w-full flex-col overflow-hidden pb-24">
-        <TrackList
-          className="h-full w-full"
-          tracks={tracks}
-          activeTrackId={currentTrack?.id ?? ""}
-          onSelect={(track) => {
-            setCurrentTrackId(track.id);
-            setIsPlaying(true);
-          }}
-        />
+    <div className="flex h-screen flex-col overflow-hidden bg-[#010308] text-foreground">
+      <div className="flex flex-1 flex-col overflow-hidden px-4 pt-4">
+        <div className="min-h-0 flex-1">
+          <TrackList
+            className="h-full w-full"
+            tracks={tracks}
+            activeTrackId={currentTrack?.id ?? ""}
+            onSelect={handleTrackSelect}
+          />
+        </div>
       </div>
 
       {currentTrack && (
-        <PlayerBar
+        <div className="flex flex-col gap-2 px-4 pb-2 shrink-0">
+          <TrackNotesEditor
+            track={currentTrack}
+            annotation={currentAnnotation}
+            onChange={handleAnnotationChange}
+          />
+          <PlayerBar
+            track={currentTrack}
+            isPlaying={isPlaying}
+            isBuffering={isBuffering}
+            elapsedSeconds={elapsedSeconds}
+            durationSeconds={durationSeconds ?? undefined}
+            onTogglePlay={handleTogglePlay}
+            onSkipNext={goToNextTrack}
+            onSkipPrevious={goToPreviousTrack}
+            onOpenFullScreen={handleOpenFullScreen}
+          />
+        </div>
+      )}
+      {isFullScreenPlayerOpen && currentTrack && (
+        <FullScreenPlayer
           track={currentTrack}
           isPlaying={isPlaying}
-          isBuffering={false}
-          elapsedSeconds={0}
-          onTogglePlay={() => setIsPlaying((prev) => !prev)}
+          isBuffering={isBuffering}
+          elapsedSeconds={elapsedSeconds}
+          durationSeconds={durationSeconds ?? undefined}
+          onTogglePlay={handleTogglePlay}
           onSkipNext={goToNextTrack}
           onSkipPrevious={goToPreviousTrack}
+          onClose={() => setIsFullScreenPlayerOpen(false)}
+          onSeek={handleSeek}
         />
       )}
     </div>

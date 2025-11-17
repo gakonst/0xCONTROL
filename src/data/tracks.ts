@@ -23,7 +23,8 @@ type CatalogResponse = {
 };
 
 const DEFAULT_COVER = "";
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+const API_BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 
 export async function fetchCatalogTracks(
   signal?: AbortSignal,
@@ -73,10 +74,20 @@ function formatDurationFromSeconds(seconds?: number | null): string {
 }
 
 function buildCatalogUrl(): string {
+  return buildApiUrl("/api/catalog");
+}
+
+export function getTrackUrl(trackId: string): string {
+  const encodedId = encodeURIComponent(trackId);
+  return buildApiUrl(`/api/tracks/${encodedId}`);
+}
+
+function buildApiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   if (!API_BASE_URL) {
-    return "/api/catalog";
+    return normalizedPath;
   }
 
   const trimmedBase = API_BASE_URL.replace(/\/+$/, "");
-  return `${trimmedBase}/api/catalog`;
+  return `${trimmedBase}${normalizedPath}`;
 }

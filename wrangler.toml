@@ -18,14 +18,3 @@ database_name = "zero-control-tracks"
 
 [vars]
 SONG_PASSWORD = "true"
-
-[env.preview]
-name = "zero-control-dapp-preview"
-
-[[env.preview.d1_databases]]
-binding = "TRACKS_DB"
-database_id = "e661b526-7ef4-4d29-a826-74d8224f3b1b"
-database_name = "zero-control-tracks"
-
-[env.preview.vars]
-SONG_PASSWORD = "true"

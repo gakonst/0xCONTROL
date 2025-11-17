@@ -1,8 +1,9 @@
-import { type PointerEvent, useRef } from "react";
+import { type MouseEvent, type PointerEvent, useRef } from "react";
 
 import { Loader2, Pause, Play } from "lucide-react";
 
 import { Track } from "@/data/tracks";
+import { cn } from "@/lib/utils";
 
 type PlayerBarProps = {
   track: Track;
@@ -13,6 +14,8 @@ type PlayerBarProps = {
   onTogglePlay: () => void;
   onSkipNext: () => void;
   onSkipPrevious: () => void;
+  className?: string;
+  onOpenFullScreen?: () => void;
 };
 
 export function PlayerBar({
@@ -24,6 +27,8 @@ export function PlayerBar({
   onTogglePlay,
   onSkipNext,
   onSkipPrevious,
+  className,
+  onOpenFullScreen,
 }: PlayerBarProps) {
   const parseDurationToSeconds = (duration?: string) => {
     if (!duration) return 0;
@@ -35,11 +40,13 @@ export function PlayerBar({
     return 0;
   };
 
-  const safeDuration = durationSeconds ?? parseDurationToSeconds(track.duration);
+  const safeDuration =
+    durationSeconds ?? parseDurationToSeconds(track.duration);
   const progress =
     safeDuration > 0 ? Math.min(elapsedSeconds / safeDuration, 1) : 0;
   const swipeStartRef = useRef<number | null>(null);
   const swipePointerRef = useRef<number | null>(null);
+  const ignoreOpenRef = useRef(false);
 
   const resetSwipe = () => {
     swipeStartRef.current = null;
@@ -47,6 +54,11 @@ export function PlayerBar({
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    const isPlayButton = Boolean(
+      target?.closest("[data-player-play-control='play']"),
+    );
+    ignoreOpenRef.current = isPlayButton;
     swipeStartRef.current = event.clientX;
     swipePointerRef.current = event.pointerId;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -72,20 +84,33 @@ export function PlayerBar({
     }
     if (swipeStartRef.current === null) return;
 
-    const deltaX = event.clientX - swipeStartRef.current;
+    const startX = swipeStartRef.current ?? event.clientX;
+    const deltaX = event.clientX - startX;
     const threshold = 60;
+    let didSwipe = false;
     if (deltaX <= -threshold) {
       onSkipNext();
+      didSwipe = true;
     } else if (deltaX >= threshold) {
       onSkipPrevious();
+      didSwipe = true;
     }
     resetSwipe();
+    if (!didSwipe && !ignoreOpenRef.current) {
+      onOpenFullScreen?.();
+    }
+    ignoreOpenRef.current = false;
+  };
+
+  const handlePlayClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    onTogglePlay();
   };
 
   return (
-    <footer className="pointer-events-none fixed inset-x-0 bottom-0">
+    <footer className={cn("w-full", className)}>
       <div
-        className="pointer-events-auto relative border-t border-white/10 bg-[rgba(18,18,18,0.98)] px-4 py-3 text-white shadow-[0_-15px_60px_rgba(0,0,0,0.55)]"
+        className="relative border-t border-white/10 bg-[rgba(18,18,18,0.98)] px-4 py-3 text-white shadow-[0_-15px_60px_rgba(0,0,0,0.55)]"
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
@@ -120,8 +145,9 @@ export function PlayerBar({
           </div>
           <button
             type="button"
-            onClick={onTogglePlay}
+            onClick={handlePlayClick}
             disabled={isBuffering}
+            data-player-play-control="play"
             className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-white text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-black/60"
           >
             {isBuffering ? (
