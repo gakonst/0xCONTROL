@@ -84,14 +84,137 @@ function App() {
     queryFn: ({ signal }) => fetchCatalogTracks(signal),
   });
 
-  const playlists = useMemo<Playlist[]>(() => {
-    return buildMockPlaylists(tracks);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [preferredPlaylistId, setPreferredPlaylistId] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!tracks.length) {
+      setPlaylists([]);
+      return;
+    }
+
+    setPlaylists((previous) => {
+      if (!previous.length) {
+        return buildMockPlaylists(tracks);
+      }
+
+      const availableTrackIds = new Set(tracks.map((track) => track.id));
+      let hasChanges = false;
+
+      const normalized = previous.map((playlist) => {
+        const filteredIds = playlist.trackIds.filter((trackId) =>
+          availableTrackIds.has(trackId),
+        );
+
+        if (filteredIds.length !== playlist.trackIds.length) {
+          hasChanges = true;
+          return {
+            ...playlist,
+            trackIds: filteredIds,
+          };
+        }
+
+        return playlist;
+      });
+
+      return hasChanges ? normalized : previous;
+    });
   }, [tracks]);
+
+  useEffect(() => {
+    if (!playlists.length) {
+      setPreferredPlaylistId(null);
+      return;
+    }
+
+    if (!preferredPlaylistId) {
+      setPreferredPlaylistId(playlists[0].id);
+    }
+  }, [playlists, preferredPlaylistId]);
 
   const activePlaylist =
     libraryView.type === "playlistDetail"
       ? playlists.find((playlist) => playlist.id === libraryView.playlistId)
       : undefined;
+
+  const quickAddTargetPlaylist = useMemo(() => {
+    if (libraryView.type === "playlistDetail" && activePlaylist) {
+      return activePlaylist;
+    }
+
+    if (preferredPlaylistId) {
+      const preferred = playlists.find(
+        (playlist) => playlist.id === preferredPlaylistId,
+      );
+      if (preferred) {
+        return preferred;
+      }
+    }
+
+    return playlists[0] ?? null;
+  }, [libraryView, activePlaylist, preferredPlaylistId, playlists]);
+
+  const addTrackToPlaylist = useCallback(
+    (playlistId: string, trackId: string) => {
+      let hasChanged = false;
+      setPlaylists((previous) => {
+        let mutated = false;
+        const next = previous.map((playlist) => {
+          if (playlist.id !== playlistId) {
+            return playlist;
+          }
+
+          if (playlist.trackIds.includes(trackId)) {
+            return playlist;
+          }
+
+          mutated = true;
+          hasChanged = true;
+          return {
+            ...playlist,
+            trackIds: [...playlist.trackIds, trackId],
+          };
+        });
+
+        return mutated ? next : previous;
+      });
+
+      return hasChanged;
+    },
+    [],
+  );
+
+  const removeTrackFromPlaylist = useCallback(
+    (playlistId: string, trackId: string) => {
+      let hasChanged = false;
+      setPlaylists((previous) => {
+        let mutated = false;
+        const next = previous.map((playlist) => {
+          if (playlist.id !== playlistId) {
+            return playlist;
+          }
+
+          if (!playlist.trackIds.includes(trackId)) {
+            return playlist;
+          }
+
+          mutated = true;
+          hasChanged = true;
+          return {
+            ...playlist,
+            trackIds: playlist.trackIds.filter((id) => id !== trackId),
+          };
+        });
+
+        return mutated ? next : previous;
+      });
+
+      return hasChanged;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (libraryView.type === "playlistDetail" && !activePlaylist) {
@@ -166,6 +289,9 @@ function App() {
     libraryView.type === "playlistDetail" && activePlaylist
       ? {
           title: activePlaylist.title,
+          eyebrow: "Playlist",
+          onBack: () => setLibraryView({ type: "playlists" }),
+          backLabel: "Playlists",
         }
       : undefined;
 
@@ -514,6 +640,7 @@ function App() {
   }, []);
 
   const handlePlaylistSelect = useCallback((playlistId: string) => {
+    setPreferredPlaylistId(playlistId);
     setLibraryView({ type: "playlistDetail", playlistId });
   }, []);
 
@@ -606,6 +733,24 @@ function App() {
               sortDirection={trackSortDirection}
               onSortChange={handleTrackSortChange}
               onSortReset={handleTrackSortReset}
+              quickAddLabel={quickAddTargetPlaylist?.title}
+              onQuickAddToPlaylist={
+                quickAddTargetPlaylist
+                  ? (trackId) =>
+                      addTrackToPlaylist(quickAddTargetPlaylist.id, trackId)
+                  : undefined
+              }
+              quickRemoveLabel={
+                libraryView.type === "playlistDetail" && activePlaylist
+                  ? activePlaylist.title
+                  : undefined
+              }
+              onQuickRemoveFromPlaylist={
+                libraryView.type === "playlistDetail" && activePlaylist
+                  ? (trackId) =>
+                      removeTrackFromPlaylist(activePlaylist.id, trackId)
+                  : undefined
+              }
             />
           )}
         </div>

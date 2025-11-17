@@ -1,4 +1,10 @@
-import { useMemo, useState } from "react";
+import {
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import { Track } from "@/data/tracks";
 import { cn } from "@/lib/utils";
@@ -6,6 +12,8 @@ import { LibraryHeader } from "@/components/library-header";
 
 export type TrackSortField = "title" | "bpm" | "key" | null;
 export type TrackSortDirection = "asc" | "desc";
+
+type QuickActionHandler = (trackId: string) => boolean;
 
 type TrackListProps = {
   tracks: Track[];
@@ -17,6 +25,10 @@ type TrackListProps = {
   sortDirection?: TrackSortDirection;
   onSortChange?: (field: TrackSortField, direction: TrackSortDirection) => void;
   onSortReset?: () => void;
+  quickAddLabel?: string;
+  onQuickAddToPlaylist?: QuickActionHandler;
+  quickRemoveLabel?: string;
+  onQuickRemoveFromPlaylist?: QuickActionHandler;
 };
 
 type TrackListHeaderConfig = {
@@ -56,6 +68,10 @@ export function TrackList({
   sortDirection: controlledSortDirection,
   onSortChange,
   onSortReset,
+  quickAddLabel,
+  onQuickAddToPlaylist,
+  quickRemoveLabel,
+  onQuickRemoveFromPlaylist,
 }: TrackListProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [uncontrolledSortField, setUncontrolledSortField] =
@@ -74,6 +90,11 @@ export function TrackList({
   const sortDirection = isSortControlled
     ? controlledSortDirection
     : uncontrolledSortDirection;
+  const quickAddEnabled =
+    typeof onQuickAddToPlaylist === "function" && Boolean(quickAddLabel);
+  const quickRemoveEnabled =
+    typeof onQuickRemoveFromPlaylist === "function" &&
+    Boolean(quickRemoveLabel);
 
   const searchCriteria = useMemo(
     () => parseSearchQuery(searchQuery),
@@ -231,67 +252,235 @@ export function TrackList({
       />
 
       <div className="flex-1 overflow-auto pb-6">
-        {sortedTracks.map((track) => {
-          const isActive = activeTrackId === track.id;
-          const fallbackInitial =
-            track.title.charAt(0).toUpperCase() ||
-            track.artist.charAt(0).toUpperCase() ||
-            "?";
-
-          return (
-            <button
-              key={track.id}
-              type="button"
-              onClick={() => onSelect(track)}
-              className={cn(
-                "group flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition md:px-5",
-                "min-h-[3.5rem]",
-                isActive ? "bg-white/5" : "hover:bg-white/5/40",
-              )}
-            >
-              <div className="flex items-center gap-2 text-xs font-medium tracking-tight text-muted-foreground">
-                <div className="h-8 w-8 flex-shrink-0 overflow-hidden border border-white/10 bg-white/5">
-                  {track.cover ? (
-                    <img
-                      src={track.cover}
-                      alt={track.title}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[0.65rem] font-semibold uppercase text-white/70">
-                      {fallbackInitial}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex min-w-0 flex-1 flex-col justify-center">
-                <p className="truncate text-[0.9rem] font-semibold text-foreground md:text-base">
-                  {track.title}
-                </p>
-                <p className="truncate text-[0.65rem] text-muted-foreground md:text-xs">
-                  {track.artist}
-                </p>
-              </div>
-
-              <div className="ml-auto flex w-[110px] flex-shrink-0 flex-col items-end text-right md:w-[120px]">
-                <span className="truncate text-sm font-semibold tracking-tight text-foreground md:text-base">
-                  {track.bpm} BPM
-                </span>
-                <div className="mt-0.5 flex items-center justify-end gap-1.5 text-xs text-muted-foreground md:text-sm">
-                  <span className="inline-flex w-8 justify-center rounded-none border border-white/60 bg-white/80 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-tight text-black/80 md:text-xs">
-                    {track.key}
-                  </span>
-                  <span className="text-[0.7rem] md:text-xs">
-                    {track.duration}
-                  </span>
-                </div>
-              </div>
-            </button>
-          );
-        })}
+        {sortedTracks.map((track) => (
+          <TrackListRow
+            key={track.id}
+            track={track}
+            isActive={activeTrackId === track.id}
+            onSelect={onSelect}
+            onQuickAdd={quickAddEnabled ? onQuickAddToPlaylist : undefined}
+            onQuickRemove={
+              quickRemoveEnabled ? onQuickRemoveFromPlaylist : undefined
+            }
+            quickAddLabel={quickAddLabel}
+            quickRemoveLabel={quickRemoveLabel}
+          />
+        ))}
       </div>
     </section>
+  );
+}
+
+type TrackListRowProps = {
+  track: Track;
+  isActive: boolean;
+  onSelect: (track: Track) => void;
+  onQuickAdd?: QuickActionHandler;
+  onQuickRemove?: QuickActionHandler;
+  quickAddLabel?: string;
+  quickRemoveLabel?: string;
+};
+
+function TrackListRow({
+  track,
+  isActive,
+  onSelect,
+  onQuickAdd,
+  onQuickRemove,
+  quickAddLabel,
+  quickRemoveLabel,
+}: TrackListRowProps) {
+  const [dragOffset, setDragOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const pointerIdRef = useRef<number | null>(null);
+  const startXRef = useRef(0);
+  const suppressClickRef = useRef(false);
+  const actionThreshold = 72;
+  const maxOffset = 160;
+  const canAdd = Boolean(onQuickAdd && quickAddLabel);
+  const canRemove = Boolean(onQuickRemove && quickRemoveLabel);
+  const fallbackInitial =
+    track.title.charAt(0).toUpperCase() ||
+    track.artist.charAt(0).toUpperCase() ||
+    "?";
+
+  const clampOffset = (value: number) => {
+    return Math.max(Math.min(value, maxOffset), -maxOffset);
+  };
+
+  const resetDrag = () => {
+    setDragOffset(0);
+    setIsDragging(false);
+    pointerIdRef.current = null;
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    pointerIdRef.current = event.pointerId;
+    startXRef.current = event.clientX;
+    suppressClickRef.current = false;
+    setIsDragging(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (pointerIdRef.current !== event.pointerId) return;
+    const delta = clampOffset(event.clientX - startXRef.current);
+    setDragOffset(delta);
+    if (Math.abs(delta) > 6) {
+      suppressClickRef.current = true;
+    }
+  };
+
+  const handlePointerEnd = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => {
+    if (pointerIdRef.current !== event.pointerId) {
+      return;
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const delta = clampOffset(event.clientX - startXRef.current);
+    resetDrag();
+
+    let handled = false;
+    if (canAdd && delta > actionThreshold) {
+      handled = onQuickAdd?.(track.id) ?? false;
+    } else if (canRemove && delta < -actionThreshold) {
+      handled = onQuickRemove?.(track.id) ?? false;
+    }
+
+    if (handled || Math.abs(delta) > 6) {
+      suppressClickRef.current = true;
+    }
+  };
+
+  const handlePointerCancel = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => {
+    if (pointerIdRef.current !== event.pointerId) {
+      return;
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    resetDrag();
+  };
+
+  const handleClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (suppressClickRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressClickRef.current = false;
+      return;
+    }
+    onSelect(track);
+  };
+
+  const addProgress = canAdd
+    ? Math.min(Math.max(dragOffset / actionThreshold, 0), 1)
+    : 0;
+  const removeProgress = canRemove
+    ? Math.min(Math.max(-dragOffset / actionThreshold, 0), 1)
+    : 0;
+
+  return (
+    <div className="relative">
+      {(canAdd || canRemove) && (
+        <>
+          <div className="pointer-events-none absolute inset-0 flex overflow-hidden">
+            <div
+              className="flex-1 bg-emerald-500/15"
+              style={{ opacity: addProgress > 0 ? addProgress : 0 }}
+            />
+            <div
+              className="flex-1 bg-rose-500/15"
+              style={{ opacity: removeProgress > 0 ? removeProgress : 0 }}
+            />
+          </div>
+          {canAdd && (
+            <div
+              className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-emerald-100 md:pl-5"
+              style={{
+                opacity: addProgress > 0 ? Math.min(1, addProgress + 0.2) : 0,
+              }}
+            >
+              <span className="text-xl font-semibold">+</span>
+            </div>
+          )}
+          {canRemove && (
+            <div
+              className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-rose-100 md:pr-5"
+              style={{
+                opacity: removeProgress > 0
+                  ? Math.min(1, removeProgress + 0.2)
+                  : 0,
+              }}
+            >
+              <span className="text-xl font-semibold">-</span>
+            </div>
+          )}
+        </>
+      )}
+      <button
+        type="button"
+        onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerCancel}
+        className={cn(
+          "group relative z-10 flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition md:px-5",
+          "min-h-[3.5rem] select-none",
+          isActive ? "bg-white/5" : "hover:bg-white/5/40",
+        )}
+        style={{
+          transform: `translateX(${dragOffset}px)`,
+          transition: isDragging ? "none" : "transform 160ms ease",
+          touchAction: "pan-y",
+        }}
+      >
+        <div className="flex items-center gap-2 text-xs font-medium tracking-tight text-muted-foreground">
+          <div className="h-8 w-8 flex-shrink-0 overflow-hidden border border-white/10 bg-white/5">
+            {track.cover ? (
+              <img
+                src={track.cover}
+                alt={track.title}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-[0.65rem] font-semibold uppercase text-white/70">
+                {fallbackInitial}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex min-w-0 flex-1 flex-col justify-center">
+          <p className="truncate text-[0.9rem] font-semibold text-foreground md:text-base">
+            {track.title}
+          </p>
+          <p className="truncate text-[0.65rem] text-muted-foreground md:text-xs">
+            {track.artist}
+          </p>
+        </div>
+
+        <div className="ml-auto flex w-[110px] flex-shrink-0 flex-col items-end text-right md:w-[120px]">
+          <span className="truncate text-sm font-semibold tracking-tight text-foreground md:text-base">
+            {track.bpm} BPM
+          </span>
+          <div className="mt-0.5 flex items-center justify-end gap-1.5 text-xs text-muted-foreground md:text-sm">
+            <span className="inline-flex w-8 justify-center rounded-none border border-white/60 bg-white/80 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-tight text-black/80 md:text-xs">
+              {track.key}
+            </span>
+            <span className="text-[0.7rem] md:text-xs">{track.duration}</span>
+          </div>
+        </div>
+
+      </button>
+    </div>
   );
 }
 
