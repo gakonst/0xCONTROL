@@ -1,0 +1,55 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        --background: 230 60% 2.5%;
+        --foreground: 210 40% 98%;
+        --card: 228 32% 7%;
+        --card-foreground: 210 40% 98%;
+        --popover: 228 40% 5%;
+        --popover-foreground: 210 40% 98%;
+        --primary: 0 0% 100%;
+        --primary-foreground: 228 40% 5%;
+        --secondary: 223 43% 10%;
+        --secondary-foreground: 210 30% 90%;
+        --muted: 223 47% 13%;
+        --muted-foreground: 215 20% 65%;
+        --accent: 240 90% 67%;
+        --accent-foreground: 228 40% 5%;
+        --destructive: 0 84% 60%;
+        --destructive-foreground: 210 40% 98%;
+        --border: 215 35% 18%;
+        --input: 215 35% 18%;
+        --ring: 240 85% 65%;
+        --radius: 1.75rem;
+        --font-sans:
+            "Space Grotesk", "Inter", "Inter Variable", system-ui,
+            -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+        @apply border-border;
+    }
+
+    body {
+        @apply min-h-screen bg-background text-foreground antialiased;
+        overflow: hidden;
+        font-family: var(--font-sans);
+        background-image:
+            radial-gradient(
+                circle at 10% 20%,
+                rgba(78, 176, 243, 0.18),
+                transparent 40%
+            ),
+            radial-gradient(
+                circle at 80% 0%,
+                rgba(244, 114, 182, 0.12),
+                transparent 45%
+            ),
+            linear-gradient(180deg, #010308 0%, #020617 45%, #050505 100%);
+    }
+}

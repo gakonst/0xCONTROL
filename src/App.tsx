@@ -1,95 +1,69 @@
-import { useCallback } from 'react'
-import type { Connector } from 'wagmi'
-import { useAccount, useConnect, useDisconnect } from 'wagmi'
+import { useMemo, useState } from "react";
 
-import { Badge } from './components/ui/badge'
-import { Button } from './components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card'
-import { SongCatalog } from './components/SongCatalog'
-import { WalletStatus } from './components/WalletStatus'
+import { PlayerBar } from "@/components/player-bar";
+import { TrackList } from "@/components/track-list";
+import { tracks as trackBank } from "@/data/tracks";
 
 function App() {
-  const { isConnected } = useAccount()
-  const { connectors, connectAsync, error, status, variables } = useConnect()
-  const isConnecting = status === 'pending'
+  const [currentTrackId, setCurrentTrackId] = useState(
+    () => trackBank[0]?.id ?? "",
+  );
+  const [isPlaying, setIsPlaying] = useState(true);
 
-  const isConnectorPending = useCallback(
-    (connector: Connector) => {
-      const activeConnector = variables?.connector
-      if (!activeConnector) return false
-      if ('id' in activeConnector) {
-        return activeConnector.id === connector.id
-      }
-      return false
-    },
-    [variables?.connector],
-  )
-  const { disconnect } = useDisconnect()
+  const currentTrack = useMemo(
+    () =>
+      trackBank.find((track) => track.id === currentTrackId) ?? trackBank[0],
+    [currentTrackId],
+  );
 
-  const handleConnect = useCallback(
-    async (connector: Connector) => {
-      try {
-        await connectAsync({ connector })
-      } catch (connectError) {
-        console.error('Failed to connect', connectError)
-      }
-    },
-    [connectAsync],
-  )
+  const goToNextTrack = () => {
+    if (!currentTrack) return;
+    const index = trackBank.findIndex((track) => track.id === currentTrack.id);
+    const nextTrack = trackBank[(index + 1) % trackBank.length];
+    setCurrentTrackId(nextTrack.id);
+  };
+
+  const goToPreviousTrack = () => {
+    if (!currentTrack) return;
+    const index = trackBank.findIndex((track) => track.id === currentTrack.id);
+    const previousTrack =
+      trackBank[(index - 1 + trackBank.length) % trackBank.length];
+    setCurrentTrackId(previousTrack.id);
+  };
 
   return (
-    <div className="page">
-      <div className="app-shell">
-        <header className="hero">
-          <div>
-            <p className="eyebrow">Zero Control</p>
-            <h1>Mix intelligence</h1>
-            <p className="hero__subtitle">Curate on-chain crates with the same polish as your favorite music apps.</p>
-          </div>
-          <div className="hero__actions">
-            <Badge variant="outline">{connectors.length} wallet options</Badge>
-            <Button variant="outline">Share crate</Button>
-          </div>
+    <div className="relative h-screen overflow-hidden bg-[#010308] text-foreground">
+      <div className="mx-auto flex h-screen w-full max-w-5xl flex-col overflow-hidden px-4 pt-8 md:px-8 lg:px-10">
+        <header className="pb-6">
+          <p className="text-sm font-semibold uppercase tracking-[0.2rem] text-foreground md:text-base">
+            0xControl
+          </p>
         </header>
 
-        <div className="app-grid">
-          <Card className="panel-card">
-            <CardHeader>
-              <CardTitle>Wallet connection</CardTitle>
-              <CardDescription>Pick a connector to sync your account with the dashboard.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {isConnected ? (
-                <Button variant="ghost" onClick={() => disconnect()} className="w-full">
-                  Disconnect wallet
-                </Button>
-              ) : (
-                <div className="connector-grid">
-                  {connectors.map((connector) => (
-                    <Button
-                      key={connector.id}
-                      onClick={() => handleConnect(connector)}
-                      disabled={!connector.ready || isConnecting}
-                      variant="secondary"
-                    >
-                      {connector.name}
-                      {!connector.ready && ' (unsupported)'}
-                      {isConnecting && isConnectorPending(connector) && '…'}
-                    </Button>
-                  ))}
-                </div>
-              )}
-              {error && <p className="inline-error">{error.message}</p>}
-            </CardContent>
-          </Card>
-
-          <WalletStatus />
+        <div className="flex-1 min-h-0">
+          <TrackList
+            className="h-full"
+            tracks={trackBank}
+            activeTrackId={currentTrack?.id ?? ""}
+            onSelect={(track) => {
+              setCurrentTrackId(track.id);
+              setIsPlaying(true);
+            }}
+          />
         </div>
-
-        <SongCatalog />
       </div>
+
+      {currentTrack && (
+        <PlayerBar
+          track={currentTrack}
+          isPlaying={isPlaying}
+          onTogglePlay={() => setIsPlaying((prev) => !prev)}
+          onSkipNext={goToNextTrack}
+          onSkipPrevious={goToPreviousTrack}
+        />
+      )}
     </div>
-  )
+  );
 }
 
-export default App
+export default App;

@@ -5,7 +5,7 @@ import { WagmiProvider } from 'wagmi'
 
 import App from './App'
 import { config } from './wagmi'
-import './styles.css'
+import './index.css'
 
 const queryClient = new QueryClient()
 
