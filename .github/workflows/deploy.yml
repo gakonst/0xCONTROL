@@ -9,6 +9,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: production
     permissions:
       contents: read
       deployments: write
@@ -36,9 +38,17 @@ jobs:
       - name: Build project
         run: bun run build
 
-      - name: Deploy to Cloudflare Workers
+      - name: Upload Worker Version
+        id: upload
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy
+          command: versions upload
+
+      - name: Deploy Worker Version to production
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: versions deploy ${{ steps.upload.outputs.version-id }}
