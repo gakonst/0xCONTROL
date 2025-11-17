@@ -183,49 +183,6 @@ function App() {
     setIsPlaying(false);
   }, []);
 
-  const seekBy = useCallback((deltaSeconds: number) => {
-    const audio = audioRef.current;
-    if (!audio || Number.isNaN(deltaSeconds)) return;
-
-    const duration =
-      Number.isFinite(audio.duration) && audio.duration > 0
-        ? audio.duration
-        : undefined;
-
-    const nextTime = Math.max(0, audio.currentTime + deltaSeconds);
-    audio.currentTime =
-      duration !== undefined ? Math.min(nextTime, duration) : nextTime;
-  }, []);
-
-  const handleSeekForward = useCallback(
-    (offset = 10) => {
-      seekBy(Math.abs(offset));
-    },
-    [seekBy],
-  );
-
-  const handleSeekBackward = useCallback(
-    (offset = 10) => {
-      seekBy(-Math.abs(offset));
-    },
-    [seekBy],
-  );
-
-  const handleSeekToPosition = useCallback((position: number) => {
-    const audio = audioRef.current;
-    if (!audio || typeof position !== "number" || Number.isNaN(position)) {
-      return;
-    }
-
-    const duration =
-      Number.isFinite(audio.duration) && audio.duration > 0
-        ? audio.duration
-        : undefined;
-    const nextTime = Math.max(0, position);
-    audio.currentTime =
-      duration !== undefined ? Math.min(nextTime, duration) : nextTime;
-  }, []);
-
   const handleSeek = useCallback((nextSeconds: number) => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -305,9 +262,6 @@ function App() {
     onPauseRequest: handlePauseRequest,
     onSkipNext: goToNextTrack,
     onSkipPrevious: goToPreviousTrack,
-    onSeekBackward: handleSeekBackward,
-    onSeekForward: handleSeekForward,
-    onSeekTo: handleSeekToPosition,
   });
 
   return (
