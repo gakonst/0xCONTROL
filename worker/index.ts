@@ -477,27 +477,26 @@ async function ingestTrackFromSource(options: {
     sourceUrl: options.sourceUrl,
   });
 
-  // const canonical = buildCanonicalTrackDetails(metadata);
-  // const audioBytes = await readSandboxFileAsUint8Array(sandbox, localFilePath);
+  const canonical = buildCanonicalTrackDetails(metadata);
+  const audioBytes = await readSandboxFileAsUint8Array(sandbox, localFilePath);
 
-  // await options.env.TRACKS_BUCKET.put(canonical.storageKey, audioBytes, {
-  //   httpMetadata: {
-  //     contentType: "audio/mpeg",
-  //   },
-  // });
+  await options.env.TRACKS_BUCKET.put(canonical.storageKey, audioBytes, {
+    httpMetadata: {
+      contentType: "audio/mpeg",
+    },
+  });
 
-  // await upsertTrackMetadata(options.env.TRACKS_DB, canonical);
-  return {} as any;
+  await upsertTrackMetadata(options.env.TRACKS_DB, canonical);
 
-  // return {
-  //   status: "complete",
-  //   trackId: canonical.storageKey,
-  //   storageKey: canonical.storageKey,
-  //   name: canonical.title,
-  //   artist: canonical.artist,
-  //   durationSeconds: canonical.durationSeconds,
-  //   sourceUrl: options.sourceUrl,
-  // };
+  return {
+    status: "complete",
+    trackId: canonical.storageKey,
+    storageKey: canonical.storageKey,
+    name: canonical.title,
+    artist: canonical.artist,
+    durationSeconds: canonical.durationSeconds,
+    sourceUrl: options.sourceUrl,
+  };
 }
 
 function buildCanonicalTrackDetails(

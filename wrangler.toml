@@ -23,6 +23,8 @@ SONG_PASSWORD = "true"
 [[containers]]
 class_name = "Sandbox"
 image = "./Dockerfile.sandbox"
+instance_type = "lite"
+max_instances = 1
 
 [durable_objects]
 bindings = [
