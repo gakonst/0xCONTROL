@@ -3,6 +3,7 @@ import { type PointerEvent, useRef } from "react";
 import { Loader2, Pause, Play } from "lucide-react";
 
 import { Track } from "@/data/tracks";
+import { cn } from "@/lib/utils";
 
 type PlayerBarProps = {
   track: Track;
@@ -13,6 +14,7 @@ type PlayerBarProps = {
   onTogglePlay: () => void;
   onSkipNext: () => void;
   onSkipPrevious: () => void;
+  className?: string;
 };
 
 export function PlayerBar({
@@ -24,6 +26,7 @@ export function PlayerBar({
   onTogglePlay,
   onSkipNext,
   onSkipPrevious,
+  className,
 }: PlayerBarProps) {
   const parseDurationToSeconds = (duration?: string) => {
     if (!duration) return 0;
@@ -35,7 +38,8 @@ export function PlayerBar({
     return 0;
   };
 
-  const safeDuration = durationSeconds ?? parseDurationToSeconds(track.duration);
+  const safeDuration =
+    durationSeconds ?? parseDurationToSeconds(track.duration);
   const progress =
     safeDuration > 0 ? Math.min(elapsedSeconds / safeDuration, 1) : 0;
   const swipeStartRef = useRef<number | null>(null);
@@ -83,9 +87,9 @@ export function PlayerBar({
   };
 
   return (
-    <footer className="pointer-events-none fixed inset-x-0 bottom-0">
+    <footer className={cn("w-full", className)}>
       <div
-        className="pointer-events-auto relative border-t border-white/10 bg-[rgba(18,18,18,0.98)] px-4 py-3 text-white shadow-[0_-15px_60px_rgba(0,0,0,0.55)]"
+        className="relative border-t border-white/10 bg-[rgba(18,18,18,0.98)] px-4 py-3 text-white shadow-[0_-15px_60px_rgba(0,0,0,0.55)]"
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}

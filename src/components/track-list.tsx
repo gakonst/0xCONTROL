@@ -143,7 +143,7 @@ export function TrackList({
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto pb-24">
+      <div className="flex-1 overflow-auto pb-6">
         {sortedTracks.map((track) => {
           const isActive = activeTrackId === track.id;
           const fallbackInitial =
