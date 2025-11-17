@@ -1,4 +1,4 @@
-import { type PointerEvent, useMemo, useRef } from "react";
+import { type MouseEvent, type PointerEvent, useMemo, useRef } from "react";
 
 import {
   ChevronDown,
@@ -21,6 +21,7 @@ type FullScreenPlayerProps = {
   onSkipNext: () => void;
   onSkipPrevious: () => void;
   onClose: () => void;
+  onSeek: (seconds: number) => void;
 };
 
 export function FullScreenPlayer({
@@ -33,6 +34,7 @@ export function FullScreenPlayer({
   onSkipNext,
   onSkipPrevious,
   onClose,
+  onSeek,
 }: FullScreenPlayerProps) {
   const parseDurationToSeconds = (duration?: string) => {
     if (!duration) return 0;
@@ -61,10 +63,21 @@ export function FullScreenPlayer({
 
   const swipeStartRef = useRef<number | null>(null);
   const swipePointerRef = useRef<number | null>(null);
+  const progressBarRef = useRef<HTMLDivElement | null>(null);
 
   const resetSwipe = () => {
     swipeStartRef.current = null;
     swipePointerRef.current = null;
+  };
+
+  const handleSeekClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (!progressBarRef.current || safeDuration <= 0) return;
+    const rect = progressBarRef.current.getBoundingClientRect();
+    const ratio = Math.min(
+      Math.max((event.clientX - rect.left) / rect.width, 0),
+      1,
+    );
+    onSeek(ratio * safeDuration);
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -169,7 +182,11 @@ export function FullScreenPlayer({
             <span>{formatTime(elapsedSeconds)}</span>
             <span>{formatTime(safeDuration)}</span>
           </div>
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-white/20">
+          <div
+            ref={progressBarRef}
+            className="mt-2 h-1.5 w-full cursor-pointer overflow-hidden rounded bg-white/20"
+            onClick={handleSeekClick}
+          >
             <div
               className="h-full bg-white"
               style={{ width: `${progress * 100}%` }}

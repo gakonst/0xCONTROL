@@ -174,6 +174,20 @@ function App() {
     setIsPlaying((prev) => !prev);
   };
 
+  const handleSeek = useCallback((nextSeconds: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const duration = Number.isFinite(audio.duration) ? audio.duration : null;
+    const safeTarget = (() => {
+      if (duration && duration > 0) {
+        return Math.min(Math.max(nextSeconds, 0), duration);
+      }
+      return Math.max(nextSeconds, 0);
+    })();
+    audio.currentTime = safeTarget;
+    setElapsedSeconds(safeTarget);
+  }, []);
+
   const handleAnnotationChange = useCallback(
     (partial: Partial<TrackAnnotation>) => {
       if (!currentTrack) return;
@@ -244,7 +258,7 @@ function App() {
       </div>
 
       {currentTrack && (
-        <div className="flex flex-col gap-2 px-4 pb-2">
+        <div className="flex flex-col gap-2 px-4 pb-2 shrink-0">
           <TrackNotesEditor
             track={currentTrack}
             annotation={currentAnnotation}
@@ -274,6 +288,7 @@ function App() {
           onSkipNext={goToNextTrack}
           onSkipPrevious={goToPreviousTrack}
           onClose={() => setIsFullScreenPlayerOpen(false)}
+          onSeek={handleSeek}
         />
       )}
     </div>

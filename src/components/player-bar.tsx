@@ -46,7 +46,7 @@ export function PlayerBar({
     safeDuration > 0 ? Math.min(elapsedSeconds / safeDuration, 1) : 0;
   const swipeStartRef = useRef<number | null>(null);
   const swipePointerRef = useRef<number | null>(null);
-  const swipeHandledRef = useRef(false);
+  const ignoreOpenRef = useRef(false);
 
   const resetSwipe = () => {
     swipeStartRef.current = null;
@@ -54,7 +54,11 @@ export function PlayerBar({
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    swipeHandledRef.current = false;
+    const target = event.target as HTMLElement | null;
+    const isPlayButton = Boolean(
+      target?.closest("[data-player-play-control='play']"),
+    );
+    ignoreOpenRef.current = isPlayButton;
     swipeStartRef.current = event.clientX;
     swipePointerRef.current = event.pointerId;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -80,29 +84,27 @@ export function PlayerBar({
     }
     if (swipeStartRef.current === null) return;
 
-    const deltaX = event.clientX - swipeStartRef.current;
+    const startX = swipeStartRef.current ?? event.clientX;
+    const deltaX = event.clientX - startX;
     const threshold = 60;
+    let didSwipe = false;
     if (deltaX <= -threshold) {
       onSkipNext();
-      swipeHandledRef.current = true;
+      didSwipe = true;
     } else if (deltaX >= threshold) {
       onSkipPrevious();
-      swipeHandledRef.current = true;
+      didSwipe = true;
     }
     resetSwipe();
+    if (!didSwipe && !ignoreOpenRef.current) {
+      onOpenFullScreen?.();
+    }
+    ignoreOpenRef.current = false;
   };
 
   const handlePlayClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     onTogglePlay();
-  };
-
-  const handleContainerClick = () => {
-    if (swipeHandledRef.current) {
-      swipeHandledRef.current = false;
-      return;
-    }
-    onOpenFullScreen?.();
   };
 
   return (
@@ -112,7 +114,6 @@ export function PlayerBar({
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
-        onClick={handleContainerClick}
       >
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 flex-none items-center justify-center overflow-hidden border border-white/10 bg-white/5 text-sm font-semibold uppercase text-white/70">
@@ -146,6 +147,7 @@ export function PlayerBar({
             type="button"
             onClick={handlePlayClick}
             disabled={isBuffering}
+            data-player-play-control="play"
             className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-white text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-black/60"
           >
             {isBuffering ? (
