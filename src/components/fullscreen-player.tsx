@@ -154,9 +154,11 @@ export function FullScreenPlayer({
           )}
         </div>
 
-        <div>
-          <p className="text-2xl font-semibold">{track.title}</p>
-          <p className="mt-1 text-base text-white/70">{track.artist}</p>
+        <div className="w-full max-w-xl">
+          <p className="truncate text-2xl font-semibold">{track.title}</p>
+          <p className="mt-1 truncate text-base text-white/70">
+            {track.artist}
+          </p>
           <p className="mt-2 text-xs uppercase tracking-[0.2rem] text-white/60">
             {track.bpm} BPM • {track.key}
           </p>
