@@ -87,11 +87,11 @@ export function TrackList({
   return (
     <section
       className={cn(
-        "flex h-full flex-col overflow-hidden border border-white/5 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_rgba(3,7,18,0.95))] shadow-[0_25px_120px_rgba(3,7,18,0.85)] backdrop-blur",
+        "flex h-full flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_rgba(3,7,18,0.95))] shadow-[0_25px_120px_rgba(3,7,18,0.85)] backdrop-blur",
         className,
       )}
     >
-      <header className="border-b border-white/5 px-5 py-4 md:px-6">
+      <header className="px-5 py-4 md:px-6">
         <div className="flex flex-col gap-1">
           <h1 className="text-base font-semibold uppercase tracking-[0.12rem] text-foreground md:text-lg">
             Control Room
@@ -143,7 +143,7 @@ export function TrackList({
         </div>
       </header>
 
-      <div className="flex-1 divide-y divide-white/5 overflow-auto pb-24">
+      <div className="flex-1 overflow-auto pb-24">
         {sortedTracks.map((track) => {
           const isActive = activeTrackId === track.id;
 

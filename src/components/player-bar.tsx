@@ -39,9 +39,21 @@ export function PlayerBar({
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     swipeStartRef.current = event.clientX;
     swipePointerRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerCancel = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    resetSwipe();
   };
 
   const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
     if (
       swipePointerRef.current !== null &&
       event.pointerId !== swipePointerRef.current
@@ -66,8 +78,7 @@ export function PlayerBar({
         className="pointer-events-auto relative border-t border-white/10 bg-[rgba(18,18,18,0.98)] px-4 py-3 text-white shadow-[0_-15px_60px_rgba(0,0,0,0.55)]"
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
-        onPointerLeave={resetSwipe}
-        onPointerCancel={resetSwipe}
+        onPointerCancel={handlePointerCancel}
       >
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 flex-none items-center justify-center overflow-hidden border border-white/10 bg-white/5 text-sm font-semibold uppercase text-white/70">
