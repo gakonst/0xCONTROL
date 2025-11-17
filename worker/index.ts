@@ -80,61 +80,16 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 async function buildCatalogResponse(env: Env): Promise<CatalogResponse> {
-  const tracks = await listTracks(env.TRACKS_BUCKET);
-  if (tracks.length === 0) {
-    return { tracks };
-  }
-
-  let metadata = new Map<string, TrackMetadataRow>();
-
   try {
-    metadata = await loadMetadataForTracks(
-      env.TRACKS_DB,
-      tracks.map((track) => track.id),
-    );
+    const tracks = await loadCatalogFromDb(env.TRACKS_DB);
+    return { tracks };
   } catch (error) {
-    console.error("Failed to load metadata from D1", error);
+    console.error("Failed to load catalog from D1", error);
+    return { tracks: [] };
   }
-
-  return {
-    tracks: tracks.map((track) =>
-      mergeTrackMetadata(track, metadata.get(track.id)),
-    ),
-  };
 }
 
-async function listTracks(bucket: R2Bucket): Promise<TrackRecord[]> {
-  const records: TrackRecord[] = [];
-  let cursor: string | undefined;
-
-  do {
-    const { objects, truncated, cursor: nextCursor } = await bucket.list({
-      cursor,
-    });
-
-    for (const object of objects) {
-      records.push(convertObjectToTrack(object));
-    }
-
-    cursor = truncated ? nextCursor : undefined;
-  } while (cursor);
-
-  return records;
-}
-
-async function loadMetadataForTracks(
-  db: D1Database,
-  trackIds: string[],
-): Promise<Map<string, TrackMetadataRow>> {
-  const metadata = new Map<string, TrackMetadataRow>();
-
-  if (trackIds.length === 0) {
-    return metadata;
-  }
-
-  const placeholders = trackIds
-    .map((_, index) => `?${index + 1}`)
-    .join(", ");
+async function loadCatalogFromDb(db: D1Database): Promise<TrackRecord[]> {
   const statement = `
     SELECT
       track_id,
@@ -144,55 +99,25 @@ async function loadMetadataForTracks(
       bpm,
       musical_key
     FROM track_metadata
-    WHERE track_id IN (${placeholders})
+    ORDER BY created_at DESC
   `;
 
-  const query = db.prepare(statement).bind(...trackIds);
+  const query = db.prepare(statement);
   const { results } = await query.all<TrackMetadataRow>();
 
-  for (const row of results ?? []) {
-    metadata.set(row.track_id, row);
-  }
-
-  return metadata;
+  return (results ?? []).map(convertMetadataRowToTrack);
 }
 
-function mergeTrackMetadata(
-  track: TrackRecord,
-  metadata: TrackMetadataRow | undefined,
-): TrackRecord {
-  if (!metadata) {
-    return track;
-  }
-
+function convertMetadataRowToTrack(row: TrackMetadataRow): TrackRecord {
   return {
-    ...track,
-    name: metadata.name ?? track.name,
-    artist: metadata.artist ?? track.artist,
-    durationSeconds:
-      metadata.duration_seconds ?? track.durationSeconds,
-    bpm: metadata.bpm ?? track.bpm,
-    key: metadata.musical_key ?? track.key,
+    id: row.track_id,
+    path: row.track_id,
+    name: row.name,
+    artist: row.artist,
+    durationSeconds: row.duration_seconds ?? undefined,
+    bpm: row.bpm ?? undefined,
+    key: row.musical_key ?? undefined,
   };
-}
-
-function convertObjectToTrack(object: R2Object): TrackRecord {
-  const leafName = object.key.split("/").pop() ?? object.key;
-  const friendlyName = decodeMaybe(leafName);
-
-  return {
-    id: object.key,
-    name: friendlyName,
-    path: object.key,
-  };
-}
-
-function decodeMaybe(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
 }
 
 async function serveAssets(request: Request, env: Env): Promise<Response> {
