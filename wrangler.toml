@@ -1,6 +1,7 @@
 name = "zero-control-dapp"
 main = "worker/index.ts"
 compatibility_date = "2024-06-15"
+compatibility_flags = [ "nodejs_compat" ]
 
 [assets]
 directory = "./dist"
@@ -18,3 +19,16 @@ database_name = "zero-control-tracks"
 
 [vars]
 SONG_PASSWORD = "true"
+
+[[containers]]
+class_name = "Sandbox"
+image = "./Dockerfile.sandbox"
+
+[durable_objects]
+bindings = [
+  { name = "Sandbox", class_name = "Sandbox" }
+]
+
+[[migrations]]
+tag = "0001-sandbox"
+new_classes = ["Sandbox"]
