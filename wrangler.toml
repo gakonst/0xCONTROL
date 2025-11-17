@@ -9,6 +9,7 @@ binding = "ASSETS"
 [[r2_buckets]]
 binding = "TRACKS_BUCKET"
 bucket_name = "zero-control-tracks"
+preview_bucket_name = "zero-control-tracks-preview"
 
 [[d1_databases]]
 binding = "TRACKS_DB"

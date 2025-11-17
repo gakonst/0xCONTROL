@@ -146,6 +146,10 @@ export function TrackList({
       <div className="flex-1 overflow-auto pb-24">
         {sortedTracks.map((track) => {
           const isActive = activeTrackId === track.id;
+          const fallbackInitial =
+            track.title.charAt(0).toUpperCase() ||
+            track.artist.charAt(0).toUpperCase() ||
+            "?";
 
           return (
             <button
@@ -160,11 +164,17 @@ export function TrackList({
             >
               <div className="flex items-center gap-2 text-xs font-medium tracking-tight text-muted-foreground">
                 <div className="h-8 w-8 flex-shrink-0 overflow-hidden border border-white/10 bg-white/5">
-                  <img
-                    src={track.cover}
-                    alt={track.title}
-                    className="h-full w-full object-cover"
-                  />
+                  {track.cover ? (
+                    <img
+                      src={track.cover}
+                      alt={track.title}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-[0.65rem] font-semibold uppercase text-white/70">
+                      {fallbackInitial}
+                    </div>
+                  )}
                 </div>
               </div>
 

@@ -1,33 +1,53 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { PlayerBar } from "@/components/player-bar";
 import { TrackList } from "@/components/track-list";
-import { tracks as trackBank } from "@/data/tracks";
+import { fetchCatalogTracks } from "@/data/tracks";
 
 function App() {
-  const [currentTrackId, setCurrentTrackId] = useState(
-    () => trackBank[0]?.id ?? "",
-  );
+  const [currentTrackId, setCurrentTrackId] = useState("");
   const [isPlaying, setIsPlaying] = useState(true);
+
+  const { data: tracks = [] } = useQuery({
+    queryKey: ["catalog"],
+    queryFn: ({ signal }) => fetchCatalogTracks(signal),
+  });
+
+  useEffect(() => {
+    if (!tracks.length) {
+      if (currentTrackId !== "") {
+        setCurrentTrackId("");
+      }
+      return;
+    }
+
+    const isCurrentTrackAvailable = tracks.some(
+      (track) => track.id === currentTrackId,
+    );
+    if (!isCurrentTrackAvailable) {
+      setCurrentTrackId(tracks[0].id);
+    }
+  }, [tracks, currentTrackId]);
 
   const currentTrack = useMemo(
     () =>
-      trackBank.find((track) => track.id === currentTrackId) ?? trackBank[0],
-    [currentTrackId],
+      tracks.find((track) => track.id === currentTrackId) ?? tracks[0],
+    [currentTrackId, tracks],
   );
 
   const goToNextTrack = () => {
-    if (!currentTrack) return;
-    const index = trackBank.findIndex((track) => track.id === currentTrack.id);
-    const nextTrack = trackBank[(index + 1) % trackBank.length];
+    if (!currentTrack || tracks.length === 0) return;
+    const index = tracks.findIndex((track) => track.id === currentTrack.id);
+    const nextTrack = tracks[(index + 1) % tracks.length];
     setCurrentTrackId(nextTrack.id);
   };
 
   const goToPreviousTrack = () => {
-    if (!currentTrack) return;
-    const index = trackBank.findIndex((track) => track.id === currentTrack.id);
+    if (!currentTrack || tracks.length === 0) return;
+    const index = tracks.findIndex((track) => track.id === currentTrack.id);
     const previousTrack =
-      trackBank[(index - 1 + trackBank.length) % trackBank.length];
+      tracks[(index - 1 + tracks.length) % tracks.length];
     setCurrentTrackId(previousTrack.id);
   };
 
@@ -36,7 +56,7 @@ function App() {
       <div className="flex h-screen w-full flex-col overflow-hidden pb-24">
         <TrackList
           className="h-full w-full"
-          tracks={trackBank}
+          tracks={tracks}
           activeTrackId={currentTrack?.id ?? ""}
           onSelect={(track) => {
             setCurrentTrackId(track.id);
