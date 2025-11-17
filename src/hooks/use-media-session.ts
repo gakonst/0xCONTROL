@@ -131,12 +131,24 @@ export function useMediaSession({
       }
     };
 
+    const shouldMapSeekToTrackSkip = /iPad|iPhone|iPod/.test(
+      navigator.userAgent || "",
+    );
+
+    const seekBackwardHandler = shouldMapSeekToTrackSkip
+      ? wrapAction(onSkipPrevious)
+      : wrapSeek(onSeekBackward);
+
+    const seekForwardHandler = shouldMapSeekToTrackSkip
+      ? wrapAction(onSkipNext)
+      : wrapSeek(onSeekForward);
+
     assignHandler("play", wrapAction(onPlayRequest));
     assignHandler("pause", wrapAction(onPauseRequest));
     assignHandler("previoustrack", wrapAction(onSkipPrevious));
     assignHandler("nexttrack", wrapAction(onSkipNext));
-    assignHandler("seekbackward", wrapSeek(onSeekBackward));
-    assignHandler("seekforward", wrapSeek(onSeekForward));
+    assignHandler("seekbackward", seekBackwardHandler);
+    assignHandler("seekforward", seekForwardHandler);
     assignHandler("seekto", wrapSeekTo(onSeekTo));
 
     return () => {

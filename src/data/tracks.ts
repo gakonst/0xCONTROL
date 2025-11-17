@@ -16,6 +16,7 @@ type CatalogTrackRecord = {
   durationSeconds?: number | null;
   bpm?: number | null;
   key?: string | null;
+  cover?: string | null;
 };
 
 type CatalogResponse = {
@@ -57,8 +58,17 @@ function convertCatalogRecordToTrack(
     bpm: record.bpm ?? 0,
     key: record.key?.toUpperCase() || "--",
     duration: formatDurationFromSeconds(record.durationSeconds),
-    cover: DEFAULT_COVER,
+    cover: normalizeTrackCover(record.cover),
   };
+}
+
+function normalizeTrackCover(cover?: string | null): string {
+  if (!cover) {
+    return DEFAULT_COVER;
+  }
+
+  const trimmed = cover.trim();
+  return trimmed.length > 0 ? trimmed : DEFAULT_COVER;
 }
 
 function formatDurationFromSeconds(seconds?: number | null): string {
