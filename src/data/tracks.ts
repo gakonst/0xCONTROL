@@ -1,3 +1,5 @@
+import type { TrackAnnotation, TrackColor } from "@/types/annotations";
+
 export type Track = {
   id: string;
   title: string;
@@ -6,6 +8,7 @@ export type Track = {
   key: string;
   duration: string;
   cover: string;
+  annotation?: TrackAnnotation;
 };
 
 type CatalogTrackRecord = {
@@ -16,6 +19,8 @@ type CatalogTrackRecord = {
   durationSeconds?: number | null;
   bpm?: number | null;
   key?: string | null;
+  annotationColor?: TrackColor | null;
+  annotationNote?: string | null;
 };
 
 type CatalogResponse = {
@@ -58,7 +63,24 @@ function convertCatalogRecordToTrack(
     key: record.key?.toUpperCase() || "--",
     duration: formatDurationFromSeconds(record.durationSeconds),
     cover: DEFAULT_COVER,
+    annotation: buildAnnotationFromRecord(record),
   };
+}
+
+function buildAnnotationFromRecord(
+  record: CatalogTrackRecord,
+): TrackAnnotation | undefined {
+  const annotation: TrackAnnotation = {};
+
+  if (record.annotationColor) {
+    annotation.color = record.annotationColor;
+  }
+
+  if (typeof record.annotationNote === "string" && record.annotationNote.length) {
+    annotation.note = record.annotationNote;
+  }
+
+  return Object.keys(annotation).length ? annotation : undefined;
 }
 
 function formatDurationFromSeconds(seconds?: number | null): string {
@@ -82,7 +104,7 @@ export function getTrackUrl(trackId: string): string {
   return buildApiUrl(`/api/tracks/${encodedId}`);
 }
 
-function buildApiUrl(path: string): string {
+export function buildApiUrl(path: string): string {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   if (!API_BASE_URL) {
     return normalizedPath;
