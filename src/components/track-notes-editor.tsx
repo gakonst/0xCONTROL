@@ -67,7 +67,7 @@ export function TrackNotesEditor({
               disabled={!hasSelection}
             />
             {isPaletteOpen && hasSelection && (
-              <div className="absolute bottom-[calc(100%+0.25rem)] left-1/2 z-10 w-32 -translate-x-1/2 border border-white/20 bg-black/90 p-1 shadow-lg">
+              <div className="absolute bottom-[calc(100%+0.25rem)] left-full ml-2 z-10 w-32 border border-white/20 bg-black/90 p-1 shadow-lg">
                 <button
                   type="button"
                   onClick={() => handleColorSelect(null)}
