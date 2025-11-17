@@ -5,6 +5,8 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { MiddlewareHandler } from "hono";
 
+type AnnotationColor = "red" | "blue" | "pink" | "cyan";
+
 interface TrackRecord {
   id: string;
   path: string;
@@ -13,6 +15,8 @@ interface TrackRecord {
   durationSeconds?: number;
   bpm?: number;
   key?: string;
+  annotationColor?: AnnotationColor | null;
+  annotationNote?: string | null;
 }
 
 interface CatalogResponse {
@@ -26,7 +30,14 @@ interface TrackMetadataRow {
   duration_seconds: number | null;
   bpm: number | null;
   musical_key: string | null;
+  annotation_color: AnnotationColor | null;
+  annotation_note: string | null;
 }
+
+type TrackAnnotationUpdatePayload = {
+  color?: AnnotationColor | null;
+  note?: string | null;
+};
 
 export interface Env {
   ASSETS: Fetcher;
@@ -54,7 +65,7 @@ app.use(
   "/api/*",
   cors({
     origin: (origin) => origin ?? "*",
-    allowMethods: ["GET", "OPTIONS"],
+    allowMethods: ["GET", "OPTIONS", "PATCH"],
     allowHeaders: ["Content-Type"],
   }),
 );
@@ -76,6 +87,87 @@ app.get("/api/catalog", requireAuth, async (c) => {
   return c.json(catalog, 200, {
     "Cache-Control": "no-store",
   });
+});
+
+app.patch("/api/tracks/:trackId/annotation", requireAuth, async (c) => {
+  const trackId = c.req.param("trackId");
+  if (!trackId) {
+    return c.text("Track identifier is required", 400);
+  }
+
+  let payload: TrackAnnotationUpdatePayload | null = null;
+  try {
+    payload = (await c.req.json()) as TrackAnnotationUpdatePayload;
+  } catch {
+    return c.text("Invalid JSON payload", 400);
+  }
+
+  if (!payload) {
+    return c.text("No annotation updates provided", 400);
+  }
+
+  const hasColorUpdate = Object.prototype.hasOwnProperty.call(payload, "color");
+  const hasNoteUpdate = Object.prototype.hasOwnProperty.call(payload, "note");
+
+  if (!hasColorUpdate && !hasNoteUpdate) {
+    return c.text("No annotation updates provided", 400);
+  }
+
+  const setStatements: string[] = [];
+  const parameters: Array<string | null> = [];
+
+  let normalizedColor: AnnotationColor | null = null;
+  if (hasColorUpdate) {
+    const requestedColor = payload.color ?? null;
+    if (requestedColor !== null && !isValidAnnotationColor(requestedColor)) {
+      return c.text("Invalid annotation color", 400);
+    }
+    normalizedColor = requestedColor;
+    setStatements.push("annotation_color = ?");
+    parameters.push(normalizedColor);
+  }
+
+  let normalizedNote: string | null = null;
+  if (hasNoteUpdate) {
+    const requestedNote = payload.note ?? null;
+    if (requestedNote !== null && typeof requestedNote !== "string") {
+      return c.text("Invalid annotation note", 400);
+    }
+    normalizedNote = typeof requestedNote === "string" ? requestedNote : null;
+    setStatements.push("annotation_note = ?");
+    parameters.push(normalizedNote);
+  }
+
+  const statement = `
+    UPDATE track_metadata
+    SET ${setStatements.join(", ")}, updated_at = CURRENT_TIMESTAMP
+    WHERE track_id = ?
+  `;
+
+  const result = await c.env.TRACKS_DB.prepare(statement)
+    .bind(...parameters, trackId)
+    .run();
+
+  if (!result.success || result.changes === 0) {
+    return c.text("Track not found", 404);
+  }
+
+  const responseBody: {
+    annotation: {
+      color?: AnnotationColor | null;
+      note?: string | null;
+    };
+  } = { annotation: {} };
+
+  if (hasColorUpdate) {
+    responseBody.annotation.color = normalizedColor;
+  }
+
+  if (hasNoteUpdate) {
+    responseBody.annotation.note = normalizedNote;
+  }
+
+  return c.json(responseBody);
 });
 
 const trackStreamHandler: MiddlewareHandler<WorkerContext> = async (c) => {
@@ -146,7 +238,9 @@ async function loadCatalogFromDb(db: D1Database): Promise<TrackRecord[]> {
       artist,
       duration_seconds,
       bpm,
-      musical_key
+      musical_key,
+      annotation_color,
+      annotation_note
     FROM track_metadata
     ORDER BY created_at DESC
   `;
@@ -166,6 +260,8 @@ function convertMetadataRowToTrack(row: TrackMetadataRow): TrackRecord {
     durationSeconds: row.duration_seconds ?? undefined,
     bpm: row.bpm ?? undefined,
     key: row.musical_key ?? undefined,
+    annotationColor: row.annotation_color ?? null,
+    annotationNote: row.annotation_note ?? null,
   };
 }
 
@@ -297,4 +393,8 @@ function inferContentTypeFromKey(key: string): string {
     default:
       return "application/octet-stream";
   }
+}
+
+function isValidAnnotationColor(value: string): value is AnnotationColor {
+  return value === "red" || value === "blue" || value === "pink" || value === "cyan";
 }

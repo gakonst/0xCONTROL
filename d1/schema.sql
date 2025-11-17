@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS track_metadata (
   duration_seconds INTEGER NOT NULL,
   bpm INTEGER NOT NULL,
   musical_key TEXT NOT NULL,
+  annotation_color TEXT,
+  annotation_note TEXT,
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );

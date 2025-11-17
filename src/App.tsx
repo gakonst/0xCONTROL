@@ -5,6 +5,7 @@ import { PlayerBar } from "@/components/player-bar";
 import { FullScreenPlayer } from "@/components/fullscreen-player";
 import { TrackList } from "@/components/track-list";
 import { TrackNotesEditor } from "@/components/track-notes-editor";
+import { updateTrackAnnotation } from "@/data/annotations";
 import { fetchCatalogTracks, getTrackUrl, type Track } from "@/data/tracks";
 import { useMediaSession } from "@/hooks/use-media-session";
 import type { TrackAnnotation } from "@/types/annotations";
@@ -22,6 +23,9 @@ function App() {
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const trackUrlRef = useRef<string>("");
+  const pendingNoteSavesRef = useRef(
+    new Map<string, { timeoutId: ReturnType<typeof setTimeout>; note: string }>(),
+  );
 
   const { data: tracks = [] } = useQuery({
     queryKey: ["catalog"],
@@ -43,6 +47,21 @@ function App() {
       setCurrentTrackId(tracks[0].id);
     }
   }, [tracks, currentTrackId]);
+
+  useEffect(() => {
+    if (!tracks.length) return;
+    setAnnotations((previous) => {
+      let hasChanges = false;
+      const next = { ...previous };
+      for (const track of tracks) {
+        if (!track.annotation) continue;
+        if (next[track.id]) continue;
+        next[track.id] = track.annotation;
+        hasChanges = true;
+      }
+      return hasChanges ? next : previous;
+    });
+  }, [tracks]);
 
   const currentTrack = useMemo(
     () => tracks.find((track) => track.id === currentTrackId) ?? tracks[0],
@@ -240,10 +259,54 @@ function App() {
     setElapsedSeconds(safeTarget);
   }, []);
 
+  const persistAnnotation = useCallback(
+    async (trackId: string, patch: Partial<TrackAnnotation>) => {
+      try {
+        await updateTrackAnnotation(trackId, patch);
+      } catch (error) {
+        console.error("Failed to save annotation", error);
+      }
+    },
+    [],
+  );
+
+  const flushAllPendingNoteUpdates = useCallback(() => {
+    const pendingEntries = pendingNoteSavesRef.current;
+    for (const [trackId, entry] of pendingEntries.entries()) {
+      clearTimeout(entry.timeoutId);
+      const normalizedNote = entry.note.length > 0 ? entry.note : null;
+      void persistAnnotation(trackId, { note: normalizedNote });
+      pendingEntries.delete(trackId);
+    }
+  }, [persistAnnotation]);
+
+  const scheduleNoteSave = useCallback(
+    (trackId: string, note: string) => {
+      const pendingEntries = pendingNoteSavesRef.current;
+      const existing = pendingEntries.get(trackId);
+      if (existing) {
+        clearTimeout(existing.timeoutId);
+      }
+
+      const timeoutId = setTimeout(() => {
+        pendingEntries.delete(trackId);
+        const normalizedNote = note.length > 0 ? note : null;
+        void persistAnnotation(trackId, { note: normalizedNote });
+      }, 2000);
+
+      pendingEntries.set(trackId, { timeoutId, note });
+    },
+    [persistAnnotation],
+  );
+
   const handleAnnotationChange = useCallback(
     (partial: Partial<TrackAnnotation>) => {
       if (!currentTrack) return;
       const trackId = currentTrack.id;
+      const existingAnnotation = annotations[trackId];
+      const previousColor = existingAnnotation?.color ?? null;
+      const previousNote = existingAnnotation?.note ?? "";
+
       setAnnotations((previous) => {
         const currentValue = previous[trackId] ?? {};
         const updated: TrackAnnotation = { ...currentValue };
@@ -282,8 +345,22 @@ function App() {
           [trackId]: updated,
         };
       });
+
+      if (Object.prototype.hasOwnProperty.call(partial, "color")) {
+        const nextColor = partial.color ?? null;
+        if (nextColor !== previousColor) {
+          void persistAnnotation(trackId, { color: nextColor });
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(partial, "note")) {
+        const nextNote = partial.note ?? "";
+        if (nextNote !== previousNote) {
+          scheduleNoteSave(trackId, nextNote);
+        }
+      }
     },
-    [currentTrack],
+    [annotations, currentTrack, persistAnnotation, scheduleNoteSave],
   );
 
   const handleTrackSelect = useCallback((track: Track) => {
@@ -309,6 +386,12 @@ function App() {
     onSeekForward: handleSeekForward,
     onSeekTo: handleSeekToPosition,
   });
+
+  useEffect(() => {
+    return () => {
+      flushAllPendingNoteUpdates();
+    };
+  }, [flushAllPendingNoteUpdates]);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#010308] text-foreground">
