@@ -5,10 +5,21 @@ import { PlayerBar } from "@/components/player-bar";
 import { FullScreenPlayer } from "@/components/fullscreen-player";
 import { TrackList } from "@/components/track-list";
 import { TrackNotesEditor } from "@/components/track-notes-editor";
+import { PlaylistBrowser } from "@/components/playlist-browser";
+import { PlaylistCreatePanel } from "@/components/playlist-create-panel";
+import { LibraryTabs, type LibraryTabKey } from "@/components/library-tabs";
 import { updateTrackAnnotation } from "@/data/annotations";
+import { buildMockPlaylists } from "@/data/playlists";
 import { fetchCatalogTracks, getTrackUrl, type Track } from "@/data/tracks";
 import { useMediaSession } from "@/hooks/use-media-session";
 import type { TrackAnnotation } from "@/types/annotations";
+import type { Playlist } from "@/types/playlists";
+
+type LibraryView =
+  | { type: "home" }
+  | { type: "playlists" }
+  | { type: "playlistDetail"; playlistId: string }
+  | { type: "create" };
 
 function App() {
   const [currentTrackId, setCurrentTrackId] = useState("");
@@ -20,6 +31,7 @@ function App() {
   const [annotations, setAnnotations] = useState<
     Record<string, TrackAnnotation>
   >({});
+  const [libraryView, setLibraryView] = useState<LibraryView>({ type: "home" });
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const trackUrlRef = useRef<string>("");
@@ -34,6 +46,43 @@ function App() {
     queryKey: ["catalog"],
     queryFn: ({ signal }) => fetchCatalogTracks(signal),
   });
+
+  const playlists = useMemo<Playlist[]>(() => {
+    return buildMockPlaylists(tracks);
+  }, [tracks]);
+
+  const activePlaylist =
+    libraryView.type === "playlistDetail"
+      ? playlists.find((playlist) => playlist.id === libraryView.playlistId)
+      : undefined;
+
+  useEffect(() => {
+    if (libraryView.type === "playlistDetail" && !activePlaylist) {
+      setLibraryView({ type: "playlists" });
+    }
+  }, [libraryView, activePlaylist]);
+
+  const visibleTracks = useMemo(() => {
+    if (libraryView.type === "playlistDetail" && activePlaylist) {
+      const playlistTrackIds = new Set(activePlaylist.trackIds);
+      return tracks.filter((track) => playlistTrackIds.has(track.id));
+    }
+    return tracks;
+  }, [tracks, libraryView, activePlaylist]);
+
+  const trackListHeader =
+    libraryView.type === "playlistDetail" && activePlaylist
+      ? {
+          title: activePlaylist.title,
+        }
+      : undefined;
+
+  const activeTab: LibraryTabKey =
+    libraryView.type === "create"
+      ? "create"
+      : libraryView.type === "home"
+        ? "home"
+        : "playlists";
 
   useEffect(() => {
     if (!tracks.length) {
@@ -372,6 +421,22 @@ function App() {
     setIsFullScreenPlayerOpen(false);
   }, []);
 
+  const handlePlaylistSelect = useCallback((playlistId: string) => {
+    setLibraryView({ type: "playlistDetail", playlistId });
+  }, []);
+
+  const handleTabChange = useCallback((tab: LibraryTabKey) => {
+    if (tab === "home") {
+      setLibraryView({ type: "home" });
+      return;
+    }
+    if (tab === "playlists") {
+      setLibraryView({ type: "playlists" });
+      return;
+    }
+    setLibraryView({ type: "create" });
+  }, []);
+
   const handleOpenFullScreen = useCallback(() => {
     setIsFullScreenPlayerOpen(true);
   }, []);
@@ -400,12 +465,23 @@ function App() {
     <div className="flex h-screen flex-col overflow-hidden bg-[#010308] text-foreground">
       <div className="flex flex-1 flex-col overflow-hidden pt-4">
         <div className="min-h-0 flex-1">
-          <TrackList
-            className="h-full w-full"
-            tracks={tracks}
-            activeTrackId={currentTrack?.id ?? ""}
-            onSelect={handleTrackSelect}
-          />
+          {libraryView.type === "playlists" ? (
+            <PlaylistBrowser
+              playlists={playlists}
+              tracks={tracks}
+              onSelect={handlePlaylistSelect}
+            />
+          ) : libraryView.type === "create" ? (
+            <PlaylistCreatePanel />
+          ) : (
+            <TrackList
+              className="h-full w-full"
+              tracks={visibleTracks}
+              activeTrackId={currentTrack?.id ?? ""}
+              onSelect={handleTrackSelect}
+              header={trackListHeader}
+            />
+          )}
         </div>
       </div>
 
@@ -428,6 +504,7 @@ function App() {
             onSkipPrevious={goToPreviousTrack}
             onOpenFullScreen={handleOpenFullScreen}
           />
+          <LibraryTabs activeTab={activeTab} onTabChange={handleTabChange} />
         </div>
       )}
       {isFullScreenPlayerOpen && currentTrack && (

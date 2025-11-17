@@ -2,12 +2,22 @@ import { useMemo, useState } from "react";
 
 import { Track } from "@/data/tracks";
 import { cn } from "@/lib/utils";
+import { LibraryHeader } from "@/components/library-header";
 
 type TrackListProps = {
   tracks: Track[];
   activeTrackId: string;
   onSelect: (track: Track) => void;
   className?: string;
+  header?: TrackListHeaderConfig;
+};
+
+type TrackListHeaderConfig = {
+  eyebrow?: string;
+  title?: string;
+  description?: string;
+  onBack?: () => void;
+  backLabel?: string;
 };
 
 const formatTotalDuration = (tracks: Track[]) => {
@@ -34,6 +44,7 @@ export function TrackList({
   activeTrackId,
   onSelect,
   className,
+  header,
 }: TrackListProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<"title" | "bpm" | "key" | null>(
@@ -101,6 +112,56 @@ export function TrackList({
     { label: "Key", value: "key" as const },
   ];
 
+  const headingTitle = header?.title ?? "Control Room";
+
+  const statsLine = [
+    `${sortedTracks.length} tracks`,
+    isFilteredView ? `filtered from ${tracks.length}` : null,
+    totalDurationLabel,
+  ]
+    .filter(Boolean)
+    .join(" • ");
+
+  const extraControls = (
+    <div className="grid grid-cols-4 gap-1 text-[0.6rem] font-semibold uppercase tracking-[0.08rem] text-muted-foreground/90 md:text-[0.65rem]">
+      {sortOptions.map((option) => {
+        const isActive = sortField === option.value;
+
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => handleSortSelection(option.value)}
+            className={cn(
+              "border border-white/30 px-2 py-1 text-[0.6rem] uppercase tracking-tight text-foreground transition md:text-[0.65rem]",
+              "rounded-none w-full leading-tight",
+              isActive ? "bg-white/10" : "bg-transparent hover:bg-white/5",
+            )}
+          >
+            <span className="flex items-center justify-center gap-2">
+              {option.label}
+              <span
+                className={cn(
+                  "inline-flex w-4 justify-center text-[0.7rem] text-muted-foreground/80 transition-opacity md:text-[0.8rem]",
+                  isActive ? "opacity-100" : "opacity-0",
+                )}
+              >
+                {sortDirection === "asc" ? "↑" : "↓"}
+              </span>
+            </span>
+          </button>
+        );
+      })}
+      <button
+        type="button"
+        onClick={handleReset}
+        className="border border-white/30 px-2 py-1 text-[0.6rem] uppercase tracking-tight text-foreground transition hover:bg-white/5 md:text-[0.65rem]"
+      >
+        Reset
+      </button>
+    </div>
+  );
+
   return (
     <section
       className={cn(
@@ -108,83 +169,30 @@ export function TrackList({
         className,
       )}
     >
-      <header className="px-3.5 py-4 md:px-5">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-base font-semibold uppercase tracking-[0.12rem] text-foreground md:text-lg">
-            Control Room
-          </h1>
-          <p className="text-[0.55rem] uppercase tracking-[0.08rem] text-muted-foreground/80">
-            {sortedTracks.length} tracks
-            {isFilteredView ? ` • filtered from ${tracks.length}` : ""} •{" "}
-            {totalDurationLabel}
-          </p>
-          <div className="mt-3 flex flex-col gap-2">
-            <div>
-              <label htmlFor="track-search" className="sr-only">
-                Search tracks
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  id="track-search"
-                  type="search"
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder='Search titles, artists, or use filters like "bpm:>130"'
-                  className="w-full border border-white/20 bg-white/5 px-3 py-2 text-xs text-white placeholder:text-white/60 focus:outline-none focus:ring-1 focus:ring-white/40"
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery("")}
-                    className="border border-white/40 px-3 py-2 text-[0.55rem] uppercase tracking-tight text-white transition hover:bg-white/10"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="grid grid-cols-4 gap-1 text-[0.6rem] font-semibold uppercase tracking-[0.08rem] text-muted-foreground/90 md:text-[0.65rem]">
-              {sortOptions.map((option) => {
-                const isActive = sortField === option.value;
-
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => handleSortSelection(option.value)}
-                    className={cn(
-                      "border border-white/30 px-2 py-1 text-[0.6rem] uppercase tracking-tight text-foreground transition md:text-[0.65rem]",
-                      "rounded-none w-full leading-tight",
-                      isActive
-                        ? "bg-white/10"
-                        : "bg-transparent hover:bg-white/5",
-                    )}
-                  >
-                    <span className="flex items-center justify-center gap-2">
-                      {option.label}
-                      <span
-                        className={cn(
-                          "inline-flex w-4 justify-center text-[0.7rem] text-muted-foreground/80 transition-opacity md:text-[0.8rem]",
-                          isActive ? "opacity-100" : "opacity-0",
-                        )}
-                      >
-                        {sortDirection === "asc" ? "↑" : "↓"}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={handleReset}
-                className="border border-white/30 px-2 py-1 text-[0.6rem] uppercase tracking-tight text-foreground transition hover:bg-white/5 md:text-[0.65rem]"
-              >
-                Reset
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
+      <LibraryHeader
+        title={headingTitle}
+        eyebrow={header?.eyebrow}
+        description={header?.description}
+        stats={statsLine}
+        search={{
+          id: "track-search",
+          value: searchQuery,
+          placeholder:
+            'Search titles, artists, or use filters like "bpm:>130"',
+          label: "Search tracks",
+          onChange: setSearchQuery,
+        }}
+        onClearSearch={() => setSearchQuery("")}
+        backAction={
+          header?.onBack
+            ? {
+                onBack: header.onBack,
+                label: header.backLabel,
+              }
+            : undefined
+        }
+        extraControls={extraControls}
+      />
 
       <div className="flex-1 overflow-auto pb-6">
         {sortedTracks.map((track) => {
