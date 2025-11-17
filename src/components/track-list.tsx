@@ -35,14 +35,26 @@ export function TrackList({
   onSelect,
   className,
 }: TrackListProps) {
+  const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<"title" | "bpm" | "key" | null>(
     null,
   );
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
-  const totalDurationLabel = formatTotalDuration(tracks);
+  const searchCriteria = useMemo(
+    () => parseSearchQuery(searchQuery),
+    [searchQuery],
+  );
+
+  const filteredTracks = useMemo(() => {
+    if (!searchCriteria.hasFilters) return tracks;
+    return tracks.filter((track) =>
+      matchesSearchCriteria(track, searchCriteria),
+    );
+  }, [tracks, searchCriteria]);
+
   const sortedTracks = useMemo(() => {
-    if (!sortField) return tracks;
+    if (!sortField) return filteredTracks;
 
     const compare = (a: Track, b: Track) => {
       switch (sortField) {
@@ -57,11 +69,15 @@ export function TrackList({
       }
     };
 
-    return [...tracks].sort((a, b) => {
+    return [...filteredTracks].sort((a, b) => {
       const comparison = compare(a, b);
       return sortDirection === "asc" ? comparison : -comparison;
     });
-  }, [tracks, sortField, sortDirection]);
+  }, [filteredTracks, sortField, sortDirection]);
+
+  const totalDurationLabel = formatTotalDuration(sortedTracks);
+  const isFilteredView =
+    searchCriteria.hasFilters || sortedTracks.length !== tracks.length;
 
   const handleSortSelection = (field: "title" | "bpm" | "key") => {
     if (sortField === field) {
@@ -76,6 +92,7 @@ export function TrackList({
   const handleReset = () => {
     setSortField(null);
     setSortDirection("asc");
+    setSearchQuery("");
   };
 
   const sortOptions = [
@@ -97,10 +114,36 @@ export function TrackList({
             Control Room
           </h1>
           <p className="text-[0.55rem] uppercase tracking-[0.08rem] text-muted-foreground/80">
-            {tracks.length} tracks • {totalDurationLabel}
+            {sortedTracks.length} tracks
+            {isFilteredView ? ` • filtered from ${tracks.length}` : ""} •{" "}
+            {totalDurationLabel}
           </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-[0.6rem] font-semibold uppercase tracking-[0.08rem] text-muted-foreground/90 md:text-[0.65rem]">
-            <div className="flex flex-wrap gap-1">
+          <div className="mt-3 flex flex-col gap-2">
+            <div>
+              <label htmlFor="track-search" className="sr-only">
+                Search tracks
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  id="track-search"
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder='Search titles, artists, or use filters like "bpm:>130"'
+                  className="w-full border border-white/20 bg-white/5 px-3 py-2 text-xs text-white placeholder:text-white/60 focus:outline-none focus:ring-1 focus:ring-white/40"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="border border-white/40 px-3 py-2 text-[0.55rem] uppercase tracking-tight text-white transition hover:bg-white/10"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-1 text-[0.6rem] font-semibold uppercase tracking-[0.08rem] text-muted-foreground/90 md:text-[0.65rem]">
               {sortOptions.map((option) => {
                 const isActive = sortField === option.value;
 
@@ -111,13 +154,13 @@ export function TrackList({
                     onClick={() => handleSortSelection(option.value)}
                     className={cn(
                       "border border-white/30 px-2 py-1 text-[0.6rem] uppercase tracking-tight text-foreground transition md:text-[0.65rem]",
-                      "rounded-none",
+                      "rounded-none w-full leading-tight",
                       isActive
                         ? "bg-white/10"
                         : "bg-transparent hover:bg-white/5",
                     )}
                   >
-                    <span className="flex items-center gap-2">
+                    <span className="flex items-center justify-center gap-2">
                       {option.label}
                       <span
                         className={cn(
@@ -131,14 +174,14 @@ export function TrackList({
                   </button>
                 );
               })}
+              <button
+                type="button"
+                onClick={handleReset}
+                className="border border-white/30 px-2 py-1 text-[0.6rem] uppercase tracking-tight text-foreground transition hover:bg-white/5 md:text-[0.65rem]"
+              >
+                Reset
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleReset}
-              className="text-[0.55rem] tracking-tight text-foreground/80 underline-offset-4 transition hover:text-foreground hover:underline md:text-[0.6rem]"
-            >
-              Reset
-            </button>
           </div>
         </div>
       </header>
@@ -206,4 +249,153 @@ export function TrackList({
       </div>
     </section>
   );
+}
+
+type BpmComparisonOperator = ">" | "<" | ">=" | "<=" | "=";
+
+type BpmFilter = {
+  operator: BpmComparisonOperator;
+  value: number;
+};
+
+type SearchCriteria = {
+  textTerms: string[];
+  bpmFilters: BpmFilter[];
+  keyFilters: string[];
+  hasFilters: boolean;
+};
+
+function parseSearchQuery(query: string): SearchCriteria {
+  const tokens = query
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  const criteria: SearchCriteria = {
+    textTerms: [],
+    bpmFilters: [],
+    keyFilters: [],
+    hasFilters: false,
+  };
+
+  for (const token of tokens) {
+    const [maybeField, ...rest] = token.split(":");
+    if (rest.length === 0) {
+      criteria.textTerms.push(token);
+      continue;
+    }
+
+    const field = maybeField.toLowerCase();
+    const value = rest.join(":");
+
+    if (field === "bpm") {
+      const bpmFilter = parseBpmFilter(value);
+      if (bpmFilter) {
+        criteria.bpmFilters.push(bpmFilter);
+        continue;
+      }
+    }
+
+    if (field === "key") {
+      if (value) {
+        criteria.keyFilters.push(value);
+        continue;
+      }
+    }
+
+    criteria.textTerms.push(token);
+  }
+
+  criteria.hasFilters =
+    criteria.textTerms.length > 0 ||
+    criteria.bpmFilters.length > 0 ||
+    criteria.keyFilters.length > 0;
+  return criteria;
+}
+
+function parseBpmFilter(value: string): BpmFilter | null {
+  const match = /^(<=|>=|>|<|=)?\s*(\d+(?:\.\d+)?)$/.exec(value);
+  if (!match) return null;
+  const operator = (match[1] as BpmComparisonOperator) ?? "=";
+  const parsedValue = Number(match[2]);
+  if (Number.isNaN(parsedValue)) return null;
+  return {
+    operator,
+    value: parsedValue,
+  };
+}
+
+function matchesSearchCriteria(
+  track: Track,
+  criteria: SearchCriteria,
+): boolean {
+  if (!criteria.hasFilters) return true;
+  if (!matchesBpmFilters(track, criteria.bpmFilters)) return false;
+  if (!matchesKeyFilters(track, criteria.keyFilters)) return false;
+  if (!matchesTextTerms(track, criteria.textTerms)) return false;
+  return true;
+}
+
+function matchesBpmFilters(track: Track, filters: BpmFilter[]): boolean {
+  if (!filters.length) return true;
+  const bpm = Number(track.bpm);
+  if (Number.isNaN(bpm)) return false;
+  return filters.every((filter) => {
+    switch (filter.operator) {
+      case ">":
+        return bpm > filter.value;
+      case ">=":
+        return bpm >= filter.value;
+      case "<":
+        return bpm < filter.value;
+      case "<=":
+        return bpm <= filter.value;
+      case "=":
+      default:
+        return bpm === filter.value;
+    }
+  });
+}
+
+function matchesKeyFilters(track: Track, filters: string[]): boolean {
+  if (!filters.length) return true;
+  const normalizedKey = track.key.toLowerCase().replace(/\s+/g, "");
+  return filters.every((filter) =>
+    normalizedKey.includes(filter.toLowerCase().replace(/\s+/g, "")),
+  );
+}
+
+function matchesTextTerms(track: Track, terms: string[]): boolean {
+  if (!terms.length) return true;
+  const fields = [
+    track.title,
+    track.artist,
+    track.id,
+    track.key,
+    track.duration,
+    String(track.bpm ?? ""),
+    track.annotation?.note ?? "",
+  ]
+    .filter(Boolean)
+    .map((value) => value.toLowerCase());
+
+  return terms.every((term) => {
+    const normalizedTerm = term.toLowerCase();
+    return fields.some((field) => fuzzyMatch(field, normalizedTerm));
+  });
+}
+
+function fuzzyMatch(source: string, query: string): boolean {
+  if (!query.length) return true;
+  let sourceIndex = 0;
+  let queryIndex = 0;
+
+  while (sourceIndex < source.length && queryIndex < query.length) {
+    if (source[sourceIndex] === query[queryIndex]) {
+      queryIndex += 1;
+    }
+    sourceIndex += 1;
+  }
+
+  return queryIndex === query.length;
 }

@@ -110,7 +110,7 @@ export function PlayerBar({
   return (
     <footer className={cn("w-full", className)}>
       <div
-        className="relative border-t border-white/10 bg-[rgba(18,18,18,0.98)] px-4 py-3 text-white shadow-[0_-15px_60px_rgba(0,0,0,0.55)]"
+        className="relative bg-[rgba(18,18,18,0.98)] px-4 py-3 text-white shadow-[0_-15px_60px_rgba(0,0,0,0.55)]"
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
@@ -148,7 +148,7 @@ export function PlayerBar({
             onClick={handlePlayClick}
             disabled={isBuffering}
             data-player-play-control="play"
-            className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-white text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-black/60"
+            className="flex h-11 w-11 flex-none items-center justify-center bg-white text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-black/60"
           >
             {isBuffering ? (
               <Loader2 className="h-4 w-4 animate-spin" />

@@ -24,7 +24,10 @@ function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const trackUrlRef = useRef<string>("");
   const pendingNoteSavesRef = useRef(
-    new Map<string, { timeoutId: ReturnType<typeof setTimeout>; note: string }>(),
+    new Map<
+      string,
+      { timeoutId: ReturnType<typeof setTimeout>; note: string }
+    >(),
   );
 
   const { data: tracks = [] } = useQuery({
