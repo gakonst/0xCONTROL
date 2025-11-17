@@ -289,9 +289,6 @@ function App() {
     libraryView.type === "playlistDetail" && activePlaylist
       ? {
           title: activePlaylist.title,
-          eyebrow: "Playlist",
-          onBack: () => setLibraryView({ type: "playlists" }),
-          backLabel: "Playlists",
         }
       : undefined;
 
