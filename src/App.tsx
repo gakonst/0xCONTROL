@@ -219,7 +219,7 @@ function App() {
   );
 
   return (
-    <div className="flex h-screen flex-col bg-[#010308] text-foreground">
+    <div className="flex h-screen flex-col overflow-hidden bg-[#010308] text-foreground">
       <div className="flex flex-1 flex-col overflow-hidden px-4 pt-4">
         <div className="min-h-0 flex-1">
           <TrackList
