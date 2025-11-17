@@ -410,11 +410,12 @@ function App() {
       </div>
 
       {currentTrack && (
-        <div className="flex flex-col gap-2 px-4 pb-2 shrink-0">
+        <div className="flex flex-col px-4 pb-2 shrink-0">
           <TrackNotesEditor
             track={currentTrack}
             annotation={currentAnnotation}
             onChange={handleAnnotationChange}
+            className="border-b border-white/10"
           />
           <PlayerBar
             track={currentTrack}
