@@ -1,4 +1,4 @@
-import { type PointerEvent, useRef } from "react";
+import { type MouseEvent, type PointerEvent, useRef } from "react";
 
 import { Loader2, Pause, Play } from "lucide-react";
 
@@ -15,6 +15,7 @@ type PlayerBarProps = {
   onSkipNext: () => void;
   onSkipPrevious: () => void;
   className?: string;
+  onOpenFullScreen?: () => void;
 };
 
 export function PlayerBar({
@@ -27,6 +28,7 @@ export function PlayerBar({
   onSkipNext,
   onSkipPrevious,
   className,
+  onOpenFullScreen,
 }: PlayerBarProps) {
   const parseDurationToSeconds = (duration?: string) => {
     if (!duration) return 0;
@@ -44,6 +46,7 @@ export function PlayerBar({
     safeDuration > 0 ? Math.min(elapsedSeconds / safeDuration, 1) : 0;
   const swipeStartRef = useRef<number | null>(null);
   const swipePointerRef = useRef<number | null>(null);
+  const swipeHandledRef = useRef(false);
 
   const resetSwipe = () => {
     swipeStartRef.current = null;
@@ -51,6 +54,7 @@ export function PlayerBar({
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    swipeHandledRef.current = false;
     swipeStartRef.current = event.clientX;
     swipePointerRef.current = event.pointerId;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -80,10 +84,25 @@ export function PlayerBar({
     const threshold = 60;
     if (deltaX <= -threshold) {
       onSkipNext();
+      swipeHandledRef.current = true;
     } else if (deltaX >= threshold) {
       onSkipPrevious();
+      swipeHandledRef.current = true;
     }
     resetSwipe();
+  };
+
+  const handlePlayClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    onTogglePlay();
+  };
+
+  const handleContainerClick = () => {
+    if (swipeHandledRef.current) {
+      swipeHandledRef.current = false;
+      return;
+    }
+    onOpenFullScreen?.();
   };
 
   return (
@@ -93,6 +112,7 @@ export function PlayerBar({
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
+        onClick={handleContainerClick}
       >
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 flex-none items-center justify-center overflow-hidden border border-white/10 bg-white/5 text-sm font-semibold uppercase text-white/70">
@@ -124,7 +144,7 @@ export function PlayerBar({
           </div>
           <button
             type="button"
-            onClick={onTogglePlay}
+            onClick={handlePlayClick}
             disabled={isBuffering}
             className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-white text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-black/60"
           >

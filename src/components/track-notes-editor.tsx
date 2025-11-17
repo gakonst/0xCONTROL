@@ -71,7 +71,7 @@ export function TrackNotesEditor({
           placeholder={track ? "Add a note…" : "Select a track"}
           value={noteValue}
           onChange={(event) => onChange({ note: event.target.value })}
-          className="h-full w-full resize-none bg-transparent text-sm leading-snug text-white outline-none placeholder:text-white/40 disabled:cursor-not-allowed disabled:opacity-40"
+          className="h-full w-full resize-none bg-transparent text-base leading-snug text-white outline-none placeholder:text-white/40 disabled:cursor-not-allowed disabled:opacity-40"
         />
       </div>
     </section>

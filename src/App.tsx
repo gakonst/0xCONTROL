@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { PlayerBar } from "@/components/player-bar";
+import { FullScreenPlayer } from "@/components/fullscreen-player";
 import { TrackList } from "@/components/track-list";
 import { TrackNotesEditor } from "@/components/track-notes-editor";
-import { fetchCatalogTracks, getTrackUrl } from "@/data/tracks";
+import { fetchCatalogTracks, getTrackUrl, type Track } from "@/data/tracks";
 import type { TrackAnnotation } from "@/types/annotations";
 
 function App() {
@@ -13,6 +14,7 @@ function App() {
   const [isBuffering, setIsBuffering] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
+  const [isFullScreenPlayerOpen, setIsFullScreenPlayerOpen] = useState(false);
   const [annotations, setAnnotations] = useState<
     Record<string, TrackAnnotation>
   >({});
@@ -218,6 +220,16 @@ function App() {
     [currentTrack],
   );
 
+  const handleTrackSelect = useCallback((track: Track) => {
+    setCurrentTrackId(track.id);
+    setIsPlaying(true);
+    setIsFullScreenPlayerOpen(false);
+  }, []);
+
+  const handleOpenFullScreen = useCallback(() => {
+    setIsFullScreenPlayerOpen(true);
+  }, []);
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#010308] text-foreground">
       <div className="flex flex-1 flex-col overflow-hidden px-4 pt-4">
@@ -226,10 +238,7 @@ function App() {
             className="h-full w-full"
             tracks={tracks}
             activeTrackId={currentTrack?.id ?? ""}
-            onSelect={(track) => {
-              setCurrentTrackId(track.id);
-              setIsPlaying(true);
-            }}
+            onSelect={handleTrackSelect}
           />
         </div>
       </div>
@@ -250,8 +259,22 @@ function App() {
             onTogglePlay={handleTogglePlay}
             onSkipNext={goToNextTrack}
             onSkipPrevious={goToPreviousTrack}
+            onOpenFullScreen={handleOpenFullScreen}
           />
         </div>
+      )}
+      {isFullScreenPlayerOpen && currentTrack && (
+        <FullScreenPlayer
+          track={currentTrack}
+          isPlaying={isPlaying}
+          isBuffering={isBuffering}
+          elapsedSeconds={elapsedSeconds}
+          durationSeconds={durationSeconds ?? undefined}
+          onTogglePlay={handleTogglePlay}
+          onSkipNext={goToNextTrack}
+          onSkipPrevious={goToPreviousTrack}
+          onClose={() => setIsFullScreenPlayerOpen(false)}
+        />
       )}
     </div>
   );
