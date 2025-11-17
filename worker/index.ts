@@ -1,154 +1,221 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import type { D1Database } from "@cloudflare/workers-types";
+import { Hono } from "hono";
+import type { MiddlewareHandler } from "hono";
+
 interface TrackRecord {
-  id: string
-  name: string
-  path: string
+  id: string;
+  path: string;
+  name: string;
+  artist?: string;
+  durationSeconds?: number;
+  bpm?: number;
+  key?: string;
 }
 
 interface CatalogResponse {
-  tracks: TrackRecord[]
+  tracks: TrackRecord[];
 }
 
-const DEFAULT_TRACKS: TrackRecord[] = [
-  {
-    id: 'intro-beat',
-    name: 'Intro Beat',
-    path: 'r2://zero-control-tracks/intro-beat.mp3',
-  },
-  {
-    id: 'ambient-flow',
-    name: 'Ambient Flow',
-    path: 'r2://zero-control-tracks/ambient-flow.mp3',
-  },
-  {
-    id: 'closing-moment',
-    name: 'Closing Moment',
-    path: 'r2://zero-control-tracks/closing-moment.mp3',
-  },
-]
+interface TrackMetadataRow {
+  track_id: string;
+  name: string;
+  artist: string;
+  duration_seconds: number | null;
+  bpm: number | null;
+  musical_key: string | null;
+}
 
 export interface Env {
-  ASSETS: Fetcher
-  SONG_PASSWORD: string
-  SONG_CATALOG?: DurableObjectNamespace<SongCatalogDO>
+  ASSETS: Fetcher;
+  SONG_PASSWORD: string;
+  TRACKS_BUCKET: R2Bucket;
+  TRACKS_DB: D1Database;
 }
 
-const INDEX_PATH = 'index.html'
-const CATALOG_OBJECT_NAME = 'primary-catalog'
-const CATALOG_DO_PATH = 'https://song-catalog.internal/tracks'
+const INDEX_PATH = "index.html";
+
+type WorkerContext = { Bindings: Env };
+
+const app = new Hono<WorkerContext>();
+
+const requireAuth: MiddlewareHandler<WorkerContext> = async (c, next) => {
+  const auth = await authenticateRequest(c);
+  if (!auth) {
+    return c.text("Unauthorized", 401);
+  }
+
+  await next();
+};
+
+async function authenticateRequest(_c: Parameters<typeof requireAuth>[0]) {
+  // TODO: wire proper auth once we lock requirements.
+  return true;
+}
+
+app.get("/api/tracks", requireAuth, async (c) => {
+  const catalog = await buildCatalogResponse(c.env);
+  return c.json(catalog, 200, {
+    "Cache-Control": "no-store",
+  });
+});
+
+app.get("/api/catalog", requireAuth, async (c) => {
+  const catalog = await buildCatalogResponse(c.env);
+  return c.json(catalog, 200, {
+    "Cache-Control": "no-store",
+  });
+});
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
-    const url = new URL(request.url)
-
-    if (url.pathname === '/api/catalog') {
-      return handleCatalogRequest(request, env)
+    const honoResponse = await app.fetch(request, env, ctx);
+    if (honoResponse.status !== 404) {
+      return honoResponse;
     }
 
-    const assetResponse = await env.ASSETS.fetch(request)
-
-    if (assetResponse.status !== 404) {
-      return assetResponse
-    }
-
-    if (request.method === 'GET' && shouldServeSPA(url)) {
-      const indexUrl = new URL(`/${INDEX_PATH}`, url.origin)
-      const indexRequest = new Request(indexUrl.toString(), request)
-      const indexResponse = await env.ASSETS.fetch(indexRequest)
-      if (indexResponse.status < 400) {
-        return indexResponse
-      }
-    }
-
-    return assetResponse
+    return serveAssets(request, env);
   },
-} satisfies ExportedHandler<Env>
+} satisfies ExportedHandler<Env>;
 
-async function handleCatalogRequest(request: Request, env: Env): Promise<Response> {
-  if (request.method !== 'GET') {
-    return new Response('Method Not Allowed', {
-      status: 405,
-      headers: { Allow: 'GET' },
-    })
+async function buildCatalogResponse(env: Env): Promise<CatalogResponse> {
+  const tracks = await listTracks(env.TRACKS_BUCKET);
+  if (tracks.length === 0) {
+    return { tracks };
   }
 
-  // Preview deployments disable authentication by setting SONG_PASSWORD to "true".
-  const expectedPassword = (env.SONG_PASSWORD ?? 'true').trim()
-  const isPasswordDisabled = expectedPassword.toLowerCase() === 'true'
+  let metadata = new Map<string, TrackMetadataRow>();
 
-  if (!isPasswordDisabled) {
-    const authHeader = request.headers.get('Authorization') ?? ''
-    const token = authHeader.startsWith('Bearer ')
-      ? authHeader.slice('Bearer '.length).trim()
-      : null
+  try {
+    metadata = await loadMetadataForTracks(
+      env.TRACKS_DB,
+      tracks.map((track) => track.id),
+    );
+  } catch (error) {
+    console.error("Failed to load metadata from D1", error);
+  }
 
-    if (!token || token.length === 0 || token !== expectedPassword) {
-      return new Response('Unauthorized', {
-        status: 401,
-        headers: { 'WWW-Authenticate': 'Bearer' },
-      })
+  return {
+    tracks: tracks.map((track) =>
+      mergeTrackMetadata(track, metadata.get(track.id)),
+    ),
+  };
+}
+
+async function listTracks(bucket: R2Bucket): Promise<TrackRecord[]> {
+  const records: TrackRecord[] = [];
+  let cursor: string | undefined;
+
+  do {
+    const { objects, truncated, cursor: nextCursor } = await bucket.list({
+      cursor,
+    });
+
+    for (const object of objects) {
+      records.push(convertObjectToTrack(object));
+    }
+
+    cursor = truncated ? nextCursor : undefined;
+  } while (cursor);
+
+  return records;
+}
+
+async function loadMetadataForTracks(
+  db: D1Database,
+  trackIds: string[],
+): Promise<Map<string, TrackMetadataRow>> {
+  const metadata = new Map<string, TrackMetadataRow>();
+
+  if (trackIds.length === 0) {
+    return metadata;
+  }
+
+  const placeholders = trackIds
+    .map((_, index) => `?${index + 1}`)
+    .join(", ");
+  const statement = `
+    SELECT
+      track_id,
+      name,
+      artist,
+      duration_seconds,
+      bpm,
+      musical_key
+    FROM track_metadata
+    WHERE track_id IN (${placeholders})
+  `;
+
+  const query = db.prepare(statement).bind(...trackIds);
+  const { results } = await query.all<TrackMetadataRow>();
+
+  for (const row of results ?? []) {
+    metadata.set(row.track_id, row);
+  }
+
+  return metadata;
+}
+
+function mergeTrackMetadata(
+  track: TrackRecord,
+  metadata: TrackMetadataRow | undefined,
+): TrackRecord {
+  if (!metadata) {
+    return track;
+  }
+
+  return {
+    ...track,
+    name: metadata.name ?? track.name,
+    artist: metadata.artist ?? track.artist,
+    durationSeconds:
+      metadata.duration_seconds ?? track.durationSeconds,
+    bpm: metadata.bpm ?? track.bpm,
+    key: metadata.musical_key ?? track.key,
+  };
+}
+
+function convertObjectToTrack(object: R2Object): TrackRecord {
+  const leafName = object.key.split("/").pop() ?? object.key;
+  const friendlyName = decodeMaybe(leafName);
+
+  return {
+    id: object.key,
+    name: friendlyName,
+    path: object.key,
+  };
+}
+
+function decodeMaybe(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+async function serveAssets(request: Request, env: Env): Promise<Response> {
+  const assetResponse = await env.ASSETS.fetch(request);
+
+  if (assetResponse.status !== 404) {
+    return assetResponse;
+  }
+
+  const url = new URL(request.url);
+
+  if (request.method === "GET" && shouldServeSPA(url)) {
+    const indexUrl = new URL(`/${INDEX_PATH}`, url.origin);
+    const indexRequest = new Request(indexUrl.toString(), request);
+    const indexResponse = await env.ASSETS.fetch(indexRequest);
+    if (indexResponse.status < 400) {
+      return indexResponse;
     }
   }
 
-  const catalog = await loadCatalog(env)
-
-  return new Response(JSON.stringify(catalog), {
-    headers: {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-store',
-    },
-  })
+  return assetResponse;
 }
 
 function shouldServeSPA(url: URL): boolean {
-  return !url.pathname.split('/').at(-1)?.includes('.')
-}
-
-export class SongCatalogDO implements DurableObject {
-  #state: DurableObjectState
-
-  constructor(state: DurableObjectState) {
-    this.#state = state
-    this.#state.blockConcurrencyWhile(async () => {
-      const existing = await this.#state.storage.get<TrackRecord[]>('tracks')
-      if (!existing) {
-        await this.#state.storage.put('tracks', DEFAULT_TRACKS)
-      }
-    })
-  }
-
-  async fetch(request: Request): Promise<Response> {
-    const { pathname } = new URL(request.url)
-
-    if (request.method === 'GET' && pathname === '/tracks') {
-      const tracks =
-        (await this.#state.storage.get<TrackRecord[]>('tracks')) ?? DEFAULT_TRACKS
-      return Response.json({ tracks })
-    }
-
-    return new Response('Not Found', { status: 404 })
-  }
-}
-
-async function loadCatalog(env: Env): Promise<CatalogResponse> {
-  if (!env.SONG_CATALOG) {
-    return { tracks: DEFAULT_TRACKS }
-  }
-
-  try {
-    const id = env.SONG_CATALOG.idFromName(CATALOG_OBJECT_NAME)
-    const stub = env.SONG_CATALOG.get(id)
-    const response = await stub.fetch(CATALOG_DO_PATH)
-
-    if (!response.ok) {
-      console.error('Durable Object returned an error response', response.status)
-      return { tracks: DEFAULT_TRACKS }
-    }
-
-    return (await response.json()) as CatalogResponse
-  } catch (error) {
-    console.error('Failed to read catalog from Durable Object', error)
-    return { tracks: DEFAULT_TRACKS }
-  }
+  return !url.pathname.split("/").at(-1)?.includes(".");
 }
