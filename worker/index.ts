@@ -2,6 +2,7 @@
 
 import type { D1Database } from "@cloudflare/workers-types";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import type { MiddlewareHandler } from "hono";
 
 interface TrackRecord {
@@ -48,6 +49,15 @@ const requireAuth: MiddlewareHandler<WorkerContext> = async (c, next) => {
 
   await next();
 };
+
+app.use(
+  "/api/*",
+  cors({
+    origin: (origin) => origin ?? "*",
+    allowMethods: ["GET", "OPTIONS"],
+    allowHeaders: ["Content-Type"],
+  }),
+);
 
 async function authenticateRequest(_c: Parameters<typeof requireAuth>[0]) {
   // TODO: wire proper auth once we lock requirements.
