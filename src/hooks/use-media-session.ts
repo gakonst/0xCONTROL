@@ -11,9 +11,6 @@ type UseMediaSessionOptions = {
   onPauseRequest: () => void;
   onSkipNext: () => void;
   onSkipPrevious: () => void;
-  onSeekBackward?: (offsetSeconds?: number) => void;
-  onSeekForward?: (offsetSeconds?: number) => void;
-  onSeekTo?: (position: number) => void;
 };
 
 const DEFAULT_ALBUM = "0xCONTROL";
@@ -27,9 +24,6 @@ export function useMediaSession({
   onPauseRequest,
   onSkipNext,
   onSkipPrevious,
-  onSeekBackward,
-  onSeekForward,
-  onSeekTo,
 }: UseMediaSessionOptions) {
   const isSupported =
     typeof navigator !== "undefined" && "mediaSession" in navigator;
@@ -135,30 +129,16 @@ export function useMediaSession({
       navigator.userAgent || "",
     );
 
-    const seekBackwardHandler = shouldMapSeekToTrackSkip
-      ? wrapAction(onSkipPrevious)
-      : wrapSeek(onSeekBackward);
-
-    const seekForwardHandler = shouldMapSeekToTrackSkip
-      ? wrapAction(onSkipNext)
-      : wrapSeek(onSeekForward);
-
     assignHandler("play", wrapAction(onPlayRequest));
     assignHandler("pause", wrapAction(onPauseRequest));
     assignHandler("previoustrack", wrapAction(onSkipPrevious));
     assignHandler("nexttrack", wrapAction(onSkipNext));
-    assignHandler("seekbackward", seekBackwardHandler);
-    assignHandler("seekforward", seekForwardHandler);
-    assignHandler("seekto", wrapSeekTo(onSeekTo));
 
     return () => {
       assignHandler("play", null);
       assignHandler("pause", null);
       assignHandler("previoustrack", null);
       assignHandler("nexttrack", null);
-      assignHandler("seekbackward", null);
-      assignHandler("seekforward", null);
-      assignHandler("seekto", null);
     };
   }, [
     isSupported,
@@ -166,8 +146,5 @@ export function useMediaSession({
     onPauseRequest,
     onSkipNext,
     onSkipPrevious,
-    onSeekBackward,
-    onSeekForward,
-    onSeekTo,
   ]);
 }
