@@ -148,7 +148,7 @@ export function TrackList({
     { label: "Key", value: "key" as const },
   ];
 
-  const headingTitle = header?.title ?? "Control Room";
+  const headingTitle = header?.title ?? "Collection";
 
   const statsLine = [
     `${sortedTracks.length} tracks`,
@@ -170,15 +170,15 @@ export function TrackList({
             onClick={() => handleSortSelection(option.value)}
             className={cn(
               "border border-white/30 px-2 py-1 text-[0.6rem] uppercase tracking-tight text-foreground transition md:text-[0.65rem]",
-              "rounded-none w-full leading-tight",
+              "rounded-none w-full leading-tight text-center",
               isActive ? "bg-white/10" : "bg-transparent hover:bg-white/5",
             )}
           >
-            <span className="flex items-center justify-center gap-2">
-              {option.label}
+            <span className="relative flex w-full items-center justify-center">
+              <span className="w-full text-center">{option.label}</span>
               <span
                 className={cn(
-                  "inline-flex w-4 justify-center text-[0.7rem] text-muted-foreground/80 transition-opacity md:text-[0.8rem]",
+                  "absolute right-1 top-1/2 -translate-y-1/2 text-[0.7rem] text-muted-foreground/80 transition-opacity md:right-1.5 md:text-[0.8rem]",
                   isActive ? "opacity-100" : "opacity-0",
                 )}
               >
@@ -191,7 +191,7 @@ export function TrackList({
       <button
         type="button"
         onClick={handleReset}
-        className="border border-white/30 px-2 py-1 text-[0.6rem] uppercase tracking-tight text-foreground transition hover:bg-white/5 md:text-[0.65rem]"
+        className="border border-white/30 px-2 py-1 text-[0.6rem] uppercase tracking-tight text-foreground transition hover:bg-white/5 md:text-[0.65rem] text-center"
       >
         Reset
       </button>
