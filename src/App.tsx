@@ -3,9 +3,17 @@ import { useQuery } from "@tanstack/react-query";
 
 import { PlayerBar } from "@/components/player-bar";
 import { FullScreenPlayer } from "@/components/fullscreen-player";
-import { TrackList } from "@/components/track-list";
+import {
+  TrackList,
+  type TrackSortDirection,
+  type TrackSortField,
+} from "@/components/track-list";
 import { TrackNotesEditor } from "@/components/track-notes-editor";
-import { PlaylistBrowser } from "@/components/playlist-browser";
+import {
+  PlaylistBrowser,
+  type PlaylistSortDirection,
+  type PlaylistSortField,
+} from "@/components/playlist-browser";
 import { PlaylistCreatePanel } from "@/components/playlist-create-panel";
 import { LibraryTabs, type LibraryTabKey } from "@/components/library-tabs";
 import { updateTrackAnnotation } from "@/data/annotations";
@@ -21,8 +29,22 @@ type LibraryView =
   | { type: "playlistDetail"; playlistId: string }
   | { type: "create" };
 
+type ParsedUrlState = {
+  view: LibraryView;
+  trackId?: string;
+  href: string;
+  pathname: string;
+  trackSortField: TrackSortField;
+  trackSortDirection: TrackSortDirection;
+  playlistSortField: PlaylistSortField;
+  playlistSortDirection: PlaylistSortDirection;
+};
+
 function App() {
-  const [currentTrackId, setCurrentTrackId] = useState("");
+  const initialUrlState = getInitialUrlState();
+  const [currentTrackId, setCurrentTrackId] = useState(
+    initialUrlState.trackId ?? "",
+  );
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -31,7 +53,18 @@ function App() {
   const [annotations, setAnnotations] = useState<
     Record<string, TrackAnnotation>
   >({});
-  const [libraryView, setLibraryView] = useState<LibraryView>({ type: "home" });
+  const [libraryView, setLibraryView] = useState<LibraryView>(
+    initialUrlState.view,
+  );
+  const [trackSortField, setTrackSortField] = useState<TrackSortField>(
+    initialUrlState.trackSortField,
+  );
+  const [trackSortDirection, setTrackSortDirection] =
+    useState<TrackSortDirection>(initialUrlState.trackSortDirection);
+  const [playlistSortField, setPlaylistSortField] =
+    useState<PlaylistSortField>(initialUrlState.playlistSortField);
+  const [playlistSortDirection, setPlaylistSortDirection] =
+    useState<PlaylistSortDirection>(initialUrlState.playlistSortDirection);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const trackUrlRef = useRef<string>("");
@@ -41,6 +74,10 @@ function App() {
       { timeoutId: ReturnType<typeof setTimeout>; note: string }
     >(),
   );
+  const basePathRef = useRef(initialUrlState.pathname);
+  const lastSyncedUrlRef = useRef(initialUrlState.href);
+  const isHandlingPopStateRef = useRef(false);
+  const hasSyncedOnceRef = useRef(false);
 
   const { data: tracks = [] } = useQuery({
     queryKey: ["catalog"],
@@ -61,6 +98,61 @@ function App() {
       setLibraryView({ type: "playlists" });
     }
   }, [libraryView, activePlaylist]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handlePopState = () => {
+      isHandlingPopStateRef.current = true;
+      const parsed = parseUrlStateFromLocation(window.location);
+      basePathRef.current = window.location.pathname;
+      lastSyncedUrlRef.current =
+        window.location.pathname + window.location.search;
+      setLibraryView(parsed.view);
+      setCurrentTrackId(parsed.trackId ?? "");
+      setTrackSortField(parsed.trackSortField);
+      setTrackSortDirection(parsed.trackSortDirection);
+      setPlaylistSortField(parsed.playlistSortField);
+      setPlaylistSortDirection(parsed.playlistSortDirection);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const nextUrl = buildUrlWithState(
+      basePathRef.current,
+      libraryView,
+      currentTrackId,
+      trackSortField,
+      trackSortDirection,
+      playlistSortField,
+      playlistSortDirection,
+    );
+    if (nextUrl === lastSyncedUrlRef.current) {
+      isHandlingPopStateRef.current = false;
+      return;
+    }
+
+    const method =
+      hasSyncedOnceRef.current && !isHandlingPopStateRef.current
+        ? "pushState"
+        : "replaceState";
+    window.history[method](null, "", nextUrl);
+    lastSyncedUrlRef.current = nextUrl;
+    hasSyncedOnceRef.current = true;
+    isHandlingPopStateRef.current = false;
+  }, [
+    libraryView,
+    currentTrackId,
+    trackSortField,
+    trackSortDirection,
+    playlistSortField,
+    playlistSortDirection,
+  ]);
 
   const visibleTracks = useMemo(() => {
     if (libraryView.type === "playlistDetail" && activePlaylist) {
@@ -425,6 +517,32 @@ function App() {
     setLibraryView({ type: "playlistDetail", playlistId });
   }, []);
 
+  const handleTrackSortChange = useCallback(
+    (field: TrackSortField, direction: TrackSortDirection) => {
+      setTrackSortField(field);
+      setTrackSortDirection(direction);
+    },
+    [],
+  );
+
+  const handleTrackSortReset = useCallback(() => {
+    setTrackSortField(null);
+    setTrackSortDirection("asc");
+  }, []);
+
+  const handlePlaylistSortChange = useCallback(
+    (field: PlaylistSortField, direction: PlaylistSortDirection) => {
+      setPlaylistSortField(field);
+      setPlaylistSortDirection(direction);
+    },
+    [],
+  );
+
+  const handlePlaylistSortReset = useCallback(() => {
+    setPlaylistSortField("title");
+    setPlaylistSortDirection("asc");
+  }, []);
+
   const handleTabChange = useCallback((tab: LibraryTabKey) => {
     if (tab === "home") {
       setLibraryView({ type: "home" });
@@ -470,6 +588,10 @@ function App() {
               playlists={playlists}
               tracks={tracks}
               onSelect={handlePlaylistSelect}
+              sortField={playlistSortField}
+              sortDirection={playlistSortDirection}
+              onSortChange={handlePlaylistSortChange}
+              onSortReset={handlePlaylistSortReset}
             />
           ) : libraryView.type === "create" ? (
             <PlaylistCreatePanel />
@@ -480,6 +602,10 @@ function App() {
               activeTrackId={currentTrack?.id ?? ""}
               onSelect={handleTrackSelect}
               header={trackListHeader}
+              sortField={trackSortField}
+              sortDirection={trackSortDirection}
+              onSortChange={handleTrackSortChange}
+              onSortReset={handleTrackSortReset}
             />
           )}
         </div>
@@ -523,6 +649,165 @@ function App() {
       )}
     </div>
   );
+}
+
+function getInitialUrlState(): ParsedUrlState {
+  if (typeof window === "undefined") {
+    return {
+      view: { type: "home" },
+      href: "/",
+      pathname: "/",
+      trackSortField: null,
+      trackSortDirection: "asc",
+      playlistSortField: "title",
+      playlistSortDirection: "asc",
+    };
+  }
+
+  return parseUrlStateFromLocation(window.location);
+}
+
+function parseUrlStateFromLocation(location: Location): ParsedUrlState {
+  const params = new URLSearchParams(location.search);
+  const viewParam = params.get("view");
+  let view: LibraryView = { type: "home" };
+
+  switch (viewParam) {
+    case "playlists":
+      view = { type: "playlists" };
+      break;
+    case "create":
+      view = { type: "create" };
+      break;
+    case "playlist": {
+      const playlistId = params.get("playlistId");
+      if (playlistId) {
+        view = { type: "playlistDetail", playlistId };
+      } else {
+        view = { type: "playlists" };
+      }
+      break;
+    }
+    case "home":
+    default:
+      view = { type: "home" };
+      break;
+  }
+
+  const trackId = params.get("trackId") ?? undefined;
+  const { field: parsedTrackSortField, direction: parsedTrackSortDirection } =
+    parseTrackSortParam(params.get("sort"));
+  const {
+    field: parsedPlaylistSortField,
+    direction: parsedPlaylistSortDirection,
+  } = parsePlaylistSortParam(params.get("playlistSort"));
+
+  return {
+    view,
+    trackId,
+    href: location.pathname + location.search,
+    pathname: location.pathname,
+    trackSortField: parsedTrackSortField,
+    trackSortDirection: parsedTrackSortDirection,
+    playlistSortField: parsedPlaylistSortField,
+    playlistSortDirection: parsedPlaylistSortDirection,
+  };
+}
+
+function buildUrlWithState(
+  pathname: string,
+  view: LibraryView,
+  trackId: string,
+  trackSortField: TrackSortField,
+  trackSortDirection: TrackSortDirection,
+  playlistSortField: PlaylistSortField,
+  playlistSortDirection: PlaylistSortDirection,
+): string {
+  const params = new URLSearchParams();
+
+  if (view.type !== "home") {
+    if (view.type === "playlistDetail") {
+      params.set("view", "playlist");
+      params.set("playlistId", view.playlistId);
+    } else {
+      params.set("view", view.type);
+    }
+  }
+
+  if (trackId) {
+    params.set("trackId", trackId);
+  }
+
+  if (trackSortField) {
+    params.set("sort", `${trackSortField}-${trackSortDirection}`);
+  }
+
+  if (playlistSortField !== "title" || playlistSortDirection !== "asc") {
+    params.set("playlistSort", `${playlistSortField}-${playlistSortDirection}`);
+  }
+
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}
+
+function parseTrackSortParam(
+  rawValue: string | null,
+): {
+  field: TrackSortField;
+  direction: TrackSortDirection;
+} {
+  if (!rawValue) {
+    return { field: null, direction: "asc" };
+  }
+
+  const [fieldPart, directionPart] = rawValue.split("-");
+  const allowedFields: Array<Exclude<TrackSortField, null>> = [
+    "title",
+    "bpm",
+    "key",
+  ];
+
+  const isValidField = (
+    value: string,
+  ): value is Exclude<TrackSortField, null> =>
+    allowedFields.includes(value as Exclude<TrackSortField, null>);
+
+  const field = isValidField(fieldPart) ? fieldPart : null;
+  const direction: TrackSortDirection =
+    directionPart === "desc" ? "desc" : "asc";
+
+  return { field, direction };
+}
+
+function parsePlaylistSortParam(
+  rawValue: string | null,
+): {
+  field: PlaylistSortField;
+  direction: PlaylistSortDirection;
+} {
+  if (!rawValue) {
+    return { field: "title", direction: "asc" };
+  }
+
+  const [fieldPart, directionPart] = rawValue.split("-");
+  const allowedFields: PlaylistSortField[] = [
+    "title",
+    "createdAt",
+    "updatedAt",
+  ];
+
+  const field = allowedFields.includes(fieldPart as PlaylistSortField)
+    ? (fieldPart as PlaylistSortField)
+    : "title";
+
+  let direction: PlaylistSortDirection =
+    directionPart === "desc" ? "desc" : "asc";
+
+  if (!directionPart) {
+    direction = field === "title" ? "asc" : "desc";
+  }
+
+  return { field, direction };
 }
 
 export default App;

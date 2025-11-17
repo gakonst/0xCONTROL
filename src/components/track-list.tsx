@@ -4,12 +4,19 @@ import { Track } from "@/data/tracks";
 import { cn } from "@/lib/utils";
 import { LibraryHeader } from "@/components/library-header";
 
+export type TrackSortField = "title" | "bpm" | "key" | null;
+export type TrackSortDirection = "asc" | "desc";
+
 type TrackListProps = {
   tracks: Track[];
   activeTrackId: string;
   onSelect: (track: Track) => void;
   className?: string;
   header?: TrackListHeaderConfig;
+  sortField?: TrackSortField;
+  sortDirection?: TrackSortDirection;
+  onSortChange?: (field: TrackSortField, direction: TrackSortDirection) => void;
+  onSortReset?: () => void;
 };
 
 type TrackListHeaderConfig = {
@@ -45,12 +52,28 @@ export function TrackList({
   onSelect,
   className,
   header,
+  sortField: controlledSortField,
+  sortDirection: controlledSortDirection,
+  onSortChange,
+  onSortReset,
 }: TrackListProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortField, setSortField] = useState<"title" | "bpm" | "key" | null>(
-    null,
-  );
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [uncontrolledSortField, setUncontrolledSortField] =
+    useState<TrackSortField>(null);
+  const [uncontrolledSortDirection, setUncontrolledSortDirection] =
+    useState<TrackSortDirection>("asc");
+
+  const isSortControlled =
+    controlledSortField !== undefined &&
+    controlledSortDirection !== undefined &&
+    typeof onSortChange === "function";
+
+  const sortField = isSortControlled
+    ? controlledSortField
+    : uncontrolledSortField;
+  const sortDirection = isSortControlled
+    ? controlledSortDirection
+    : uncontrolledSortDirection;
 
   const searchCriteria = useMemo(
     () => parseSearchQuery(searchQuery),
@@ -90,19 +113,32 @@ export function TrackList({
   const isFilteredView =
     searchCriteria.hasFilters || sortedTracks.length !== tracks.length;
 
-  const handleSortSelection = (field: "title" | "bpm" | "key") => {
+  const updateSort = (field: TrackSortField, direction: TrackSortDirection) => {
+    if (isSortControlled) {
+      onSortChange?.(field, direction);
+    } else {
+      setUncontrolledSortField(field);
+      setUncontrolledSortDirection(direction);
+    }
+  };
+
+  const handleSortSelection = (field: Exclude<TrackSortField, null>) => {
     if (sortField === field) {
-      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      const nextDirection = sortDirection === "asc" ? "desc" : "asc";
+      updateSort(field, nextDirection);
       return;
     }
 
-    setSortField(field);
-    setSortDirection("asc");
+    updateSort(field, "asc");
   };
 
   const handleReset = () => {
-    setSortField(null);
-    setSortDirection("asc");
+    if (isSortControlled) {
+      onSortReset?.();
+    } else {
+      setUncontrolledSortField(null);
+      setUncontrolledSortDirection("asc");
+    }
     setSearchQuery("");
   };
 

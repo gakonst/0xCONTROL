@@ -5,22 +5,29 @@ import type { Playlist } from "@/types/playlists";
 import { cn } from "@/lib/utils";
 import { LibraryHeader } from "@/components/library-header";
 
+export type PlaylistSortField = "title" | "createdAt" | "updatedAt";
+export type PlaylistSortDirection = "asc" | "desc";
+
 type PlaylistBrowserProps = {
   playlists: Playlist[];
   tracks: Track[];
   onSelect: (playlistId: string) => void;
+  sortField: PlaylistSortField;
+  sortDirection: PlaylistSortDirection;
+  onSortChange: (field: PlaylistSortField, direction: PlaylistSortDirection) => void;
+  onSortReset: () => void;
 };
 
 export function PlaylistBrowser({
   playlists,
   tracks,
   onSelect,
+  sortField,
+  sortDirection,
+  onSortChange,
+  onSortReset,
 }: PlaylistBrowserProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortField, setSortField] = useState<"title" | "createdAt" | "updatedAt">(
-    "title",
-  );
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   const trackMap = useMemo(() => {
     return new Map(tracks.map((track) => [track.id, track]));
@@ -80,18 +87,18 @@ export function PlaylistBrowser({
     { label: "Date Modified", value: "updatedAt" },
   ];
 
-  const handleSortSelection = (value: typeof sortField) => {
+  const handleSortSelection = (value: PlaylistSortField) => {
     if (sortField === value) {
-      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      const nextDirection = sortDirection === "asc" ? "desc" : "asc";
+      onSortChange(value, nextDirection);
       return;
     }
-    setSortField(value);
-    setSortDirection(value === "title" ? "asc" : "desc");
+    const defaultDirection = value === "title" ? "asc" : "desc";
+    onSortChange(value, defaultDirection);
   };
 
   const handleResetSort = () => {
-    setSortField("title");
-    setSortDirection("asc");
+    onSortReset();
   };
 
   if (!playlists.length) {
