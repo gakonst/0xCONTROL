@@ -158,6 +158,7 @@ export function FullScreenPlayer({
             progress={progress}
             variant="full"
             className="h-full w-full rounded-2xl border border-white/30 bg-black/20 shadow-[0_25px_80px_rgba(0,0,0,0.65)]"
+            bpm={track.bpm}
           />
         </div>
 

@@ -168,6 +168,7 @@ export function TrackList({
                     progress={isActive ? activeProgress : 0}
                     variant="thumbnail"
                     className="h-full w-full rounded-lg"
+                    bpm={track.bpm}
                   />
                 </div>
               </div>

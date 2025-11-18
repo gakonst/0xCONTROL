@@ -1,176 +1,244 @@
-export type FrequencyBands = {
-  low: number;
-  mid: number;
-  high: number;
+export type BandFrame = {
+  bass: number;
+  melody: number;
+  voice: number;
+  hats: number;
 };
 
-export type WaveformSegment = {
-  amplitude: number;
-  bands: FrequencyBands;
-  envelopes: FrequencyBands;
+export type BandStats = {
+  bassMax: number;
+  melodyMax: number;
+  voiceMax: number;
+  hatsMax: number;
 };
-
-const MAX_SEGMENTS = 640;
-const SEGMENT_SIZE = 1024; // Must be a power of two for FFT
-const LOW_MAX_HZ = 200;
-const MID_MAX_HZ = 2000;
 
 export type WaveformAnalysis = {
-  segments: WaveformSegment[];
+  frames: BandFrame[];
+  frameRate: number;
   durationSeconds: number;
+  stats: BandStats;
 };
+
+const WINDOW_SIZE = 2048;
+const HOP_SIZE = 1024;
+const TARGET_FRAME_RATE = 120;
+
+const BAND_RANGES: Record<keyof BandFrame, [number, number]> = {
+  bass: [20, 150],
+  melody: [150, 800],
+  voice: [800, 4000],
+  hats: [6000, 16000],
+};
+
+const SMOOTHING: Record<keyof BandFrame, { attack: number; release: number }> = {
+  bass: { attack: 0.25, release: 0.08 },
+  melody: { attack: 0.2, release: 0.08 },
+  voice: { attack: 0.18, release: 0.08 },
+  hats: { attack: 0.16, release: 0.08 },
+};
+
+const HANN_WINDOW = buildHannWindow(WINDOW_SIZE);
 
 export function extractWaveformFromAudioBuffer(
   buffer: AudioBuffer,
 ): WaveformAnalysis {
-  const channelData =
-    buffer.numberOfChannels > 0
-      ? buffer.getChannelData(0)
-      : new Float32Array(buffer.length);
-  const samplesPerSegment = SEGMENT_SIZE;
-  const totalSegments = Math.min(
-    MAX_SEGMENTS,
-    Math.ceil(channelData.length / samplesPerSegment),
-  );
-  const segments: WaveformSegment[] = [];
-  let maxAmplitude = 0;
+  const mono = mixDownToMono(buffer);
+  const durationSeconds = buffer.duration;
+  const frameCount = Math.max(1, Math.ceil(durationSeconds * TARGET_FRAME_RATE));
+  const frames: BandFrame[] = Array.from({ length: frameCount }, () => ({
+    bass: 0,
+    melody: 0,
+    voice: 0,
+    hats: 0,
+  }));
 
-  for (let index = 0; index < totalSegments; index++) {
-    const start = index * samplesPerSegment;
-    if (start >= channelData.length) break;
-    const end = Math.min(start + samplesPerSegment, channelData.length);
-    const segmentSlice = channelData.subarray(start, end);
-    const paddedSegment = new Float32Array(samplesPerSegment);
-    paddedSegment.set(segmentSlice);
+  const windowBuffer = new Float32Array(WINDOW_SIZE);
 
-    const amplitude = computeRms(paddedSegment);
-    const bands = computeFrequencyBands(paddedSegment, buffer.sampleRate);
-    segments.push({ amplitude, bands, envelopes: bands });
-    maxAmplitude = Math.max(maxAmplitude, amplitude);
+  for (let start = 0; start < mono.length; start += HOP_SIZE) {
+    for (let i = 0; i < WINDOW_SIZE; i++) {
+      const sourceIndex = start + i;
+      const sample = sourceIndex < mono.length ? mono[sourceIndex]! : 0;
+      windowBuffer[i] = sample * HANN_WINDOW[i]!;
+    }
+
+    const magnitudes = performFftMagnitudes(windowBuffer);
+    const energies = computeBandEnergies(magnitudes, buffer.sampleRate);
+    const timeSeconds = start / buffer.sampleRate;
+    const frameIndex = Math.min(
+      frameCount - 1,
+      Math.max(0, Math.floor(timeSeconds * TARGET_FRAME_RATE)),
+    );
+
+    const frame = frames[frameIndex]!;
+    frame.bass = Math.max(frame.bass, energies.bass);
+    frame.melody = Math.max(frame.melody, energies.melody);
+    frame.voice = Math.max(frame.voice, energies.voice);
+    frame.hats = Math.max(frame.hats, energies.hats);
   }
 
-  const normalizedSegments: WaveformSegment[] = segments.map((segment) => {
-    const amplitude = maxAmplitude > 0 ? segment.amplitude / maxAmplitude : 0;
-    return {
-      amplitude,
-      bands: segment.bands,
-      envelopes: {
-        low: amplitude * segment.bands.low,
-        mid: amplitude * segment.bands.mid,
-        high: amplitude * segment.bands.high,
-      },
-    };
-  });
-
-  const smoothedEnvelopes = smoothBandEnvelopes(
-    normalizedSegments.map((segment) => segment.envelopes),
-  );
+  const stats = computeBandStats(frames);
+  const normalizedFrames = normalizeFrames(frames, stats);
+  const smoothedFrames = smoothFrames(normalizedFrames);
 
   return {
-    segments: normalizedSegments.map((segment, index) => ({
-      amplitude: segment.amplitude,
-      bands: segment.bands,
-      envelopes: smoothedEnvelopes[index] ?? segment.envelopes,
-    })),
-    durationSeconds: buffer.duration,
+    frames: smoothedFrames,
+    frameRate: TARGET_FRAME_RATE,
+    durationSeconds,
+    stats,
   };
 }
 
-function computeRms(samples: Float32Array): number {
-  if (!samples.length) return 0;
-  let sumSquares = 0;
-  for (let i = 0; i < samples.length; i++) {
-    const value = samples[i];
-    sumSquares += value * value;
+function mixDownToMono(buffer: AudioBuffer): Float32Array {
+  const { numberOfChannels, length } = buffer;
+  if (numberOfChannels <= 1) {
+    return buffer.getChannelData(0);
   }
-  return Math.sqrt(sumSquares / samples.length);
-}
 
-function computeFrequencyBands(
-  samples: Float32Array,
-  sampleRate: number,
-): FrequencyBands {
-  const magnitudes = performFftMagnitudes(samples);
-  const binHz = sampleRate / samples.length;
-  let low = 0;
-  let mid = 0;
-  let high = 0;
-
-  for (let bin = 1; bin < magnitudes.length; bin++) {
-    const frequency = bin * binHz;
-    const magnitude = magnitudes[bin];
-    if (frequency < LOW_MAX_HZ) {
-      low += magnitude;
-    } else if (frequency < MID_MAX_HZ) {
-      mid += magnitude;
-    } else {
-      high += magnitude;
+  const mono = new Float32Array(length);
+  for (let channel = 0; channel < numberOfChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    for (let i = 0; i < length; i++) {
+      mono[i] += channelData[i] ?? 0;
     }
   }
 
-  const total = low + mid + high || 1;
-  return {
-    low: low / total,
-    mid: mid / total,
-    high: high / total,
-  };
+  const scale = 1 / numberOfChannels;
+  for (let i = 0; i < length; i++) {
+    mono[i] *= scale;
+  }
+
+  return mono;
 }
 
-function smoothBandEnvelopes(values: FrequencyBands[]): FrequencyBands[] {
-  if (!values.length) return [];
-  const low = values.map((value) => value.low);
-  const mid = values.map((value) => value.mid);
-  const high = values.map((value) => value.high);
+function computeBandStats(frames: BandFrame[]): BandStats {
+  return frames.reduce<BandStats>(
+    (stats, frame) => ({
+      bassMax: Math.max(stats.bassMax, frame.bass),
+      melodyMax: Math.max(stats.melodyMax, frame.melody),
+      voiceMax: Math.max(stats.voiceMax, frame.voice),
+      hatsMax: Math.max(stats.hatsMax, frame.hats),
+    }),
+    { bassMax: 0, melodyMax: 0, voiceMax: 0, hatsMax: 0 },
+  );
+}
 
-  const smoothedLow = smoothArray(low, 0.12, 0.04);
-  const smoothedMid = smoothArray(mid, 0.18, 0.06);
-  const smoothedHigh = smoothArray(high, 0.28, 0.1);
+function normalizeFrames(frames: BandFrame[], stats: BandStats): BandFrame[] {
+  const normalized: BandFrame[] = new Array(frames.length);
+  for (let i = 0; i < frames.length; i++) {
+    const frame = frames[i]!;
+    normalized[i] = {
+      bass: normalizeBand(frame.bass, stats.bassMax),
+      melody: normalizeBand(frame.melody, stats.melodyMax),
+      voice: normalizeBand(frame.voice, stats.voiceMax),
+      hats: normalizeBand(frame.hats, stats.hatsMax),
+    };
+  }
+  return normalized;
+}
 
-  return values.map((_, index) => ({
-    low: smoothedLow[index] ?? 0,
-    mid: smoothedMid[index] ?? 0,
-    high: smoothedHigh[index] ?? 0,
+function normalizeBand(value: number, maxValue: number): number {
+  if (maxValue <= 0) return 0;
+  const safeMax = maxValue * 0.9 || maxValue;
+  const normalized = clamp01(value / safeMax);
+  return Math.sqrt(normalized);
+}
+
+function smoothFrames(frames: BandFrame[]): BandFrame[] {
+  if (!frames.length) return frames;
+  const keys = Object.keys(BAND_RANGES) as (keyof BandFrame)[];
+  const smoothedSeries: Record<keyof BandFrame, number[]> = {
+    bass: [],
+    melody: [],
+    voice: [],
+    hats: [],
+  };
+
+  keys.forEach((key) => {
+    const values = frames.map((frame) => frame[key]);
+    const { attack, release } = SMOOTHING[key]!;
+    smoothedSeries[key] = smoothArray(values, attack, release);
+  });
+
+  return frames.map((_, index) => ({
+    bass: smoothedSeries.bass[index] ?? 0,
+    melody: smoothedSeries.melody[index] ?? 0,
+    voice: smoothedSeries.voice[index] ?? 0,
+    hats: smoothedSeries.hats[index] ?? 0,
   }));
 }
 
-function smoothArray(
-  values: number[],
-  attack: number,
-  release: number,
-): number[] {
+function computeBandEnergies(
+  magnitudes: Float32Array,
+  sampleRate: number,
+): BandFrame {
+  const binHz = sampleRate / WINDOW_SIZE;
+  const energies: BandFrame = { bass: 0, melody: 0, voice: 0, hats: 0 };
+
+  for (let bin = 1; bin < magnitudes.length; bin++) {
+    const frequency = bin * binHz;
+    const magnitude = magnitudes[bin]!;
+    if (frequency >= BAND_RANGES.bass[0] && frequency < BAND_RANGES.bass[1]) {
+      energies.bass += magnitude;
+      continue;
+    }
+    if (
+      frequency >= BAND_RANGES.melody[0] &&
+      frequency < BAND_RANGES.melody[1]
+    ) {
+      energies.melody += magnitude;
+      continue;
+    }
+    if (frequency >= BAND_RANGES.voice[0] && frequency < BAND_RANGES.voice[1]) {
+      energies.voice += magnitude;
+      continue;
+    }
+    if (frequency >= BAND_RANGES.hats[0] && frequency < BAND_RANGES.hats[1]) {
+      energies.hats += magnitude;
+    }
+  }
+
+  return energies;
+}
+
+function smoothArray(values: number[], attack: number, release: number): number[] {
   if (!values.length) return [];
   const forward: number[] = new Array(values.length);
   const backward: number[] = new Array(values.length);
 
-  let current = values[0];
+  let current = values[0]!;
   forward[0] = current;
   for (let index = 1; index < values.length; index++) {
-    const next = values[index];
+    const next = values[index]!;
     const coefficient = next > current ? attack : release;
     current = current + coefficient * (next - current);
     forward[index] = current;
   }
 
-  current = values[values.length - 1];
+  current = values[values.length - 1]!;
   backward[values.length - 1] = current;
   for (let index = values.length - 2; index >= 0; index--) {
-    const next = values[index];
+    const next = values[index]!;
     const coefficient = next > current ? attack : release;
     current = current + coefficient * (next - current);
     backward[index] = current;
   }
 
-  return values.map((_, index) => {
-    const smoothed = (forward[index]! + backward[index]!) / 2;
-    return clamp01(smoothed);
-  });
+  return values.map((_, index) => clamp01((forward[index]! + backward[index]!) / 2));
 }
 
 function clamp01(value: number): number {
-  if (Number.isNaN(value)) return 0;
+  if (!Number.isFinite(value)) return 0;
   if (value <= 0) return 0;
   if (value >= 1) return 1;
   return value;
+}
+
+function buildHannWindow(size: number): Float32Array {
+  const window = new Float32Array(size);
+  for (let i = 0; i < size; i++) {
+    window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (size - 1)));
+  }
+  return window;
 }
 
 function performFftMagnitudes(samples: Float32Array): Float32Array {
@@ -181,13 +249,13 @@ function performFftMagnitudes(samples: Float32Array): Float32Array {
   const reverseTable = buildReverseTable(n);
 
   for (let i = 0; i < n; i++) {
-    const j = reverseTable[i];
+    const j = reverseTable[i]!;
     if (j > i) {
-      const tempReal = real[i];
-      real[i] = real[j];
+      const tempReal = real[i]!;
+      real[i] = real[j]!;
       real[j] = tempReal;
-      const tempImag = imag[i];
-      imag[i] = imag[j];
+      const tempImag = imag[i]!;
+      imag[i] = imag[j]!;
       imag[j] = tempImag;
     }
   }
@@ -203,12 +271,12 @@ function performFftMagnitudes(samples: Float32Array): Float32Array {
         const cosAngle = Math.cos(angle);
         const sinAngle = Math.sin(angle);
         const tempReal =
-          cosAngle * real[oddIndex] - sinAngle * imag[oddIndex];
+          cosAngle * real[oddIndex]! - sinAngle * imag[oddIndex]!;
         const tempImag =
-          sinAngle * real[oddIndex] + cosAngle * imag[oddIndex];
+          sinAngle * real[oddIndex]! + cosAngle * imag[oddIndex]!;
 
-        real[oddIndex] = real[evenIndex] - tempReal;
-        imag[oddIndex] = imag[evenIndex] - tempImag;
+        real[oddIndex] = real[evenIndex]! - tempReal;
+        imag[oddIndex] = imag[evenIndex]! - tempImag;
         real[evenIndex] += tempReal;
         imag[evenIndex] += tempImag;
       }
@@ -217,8 +285,8 @@ function performFftMagnitudes(samples: Float32Array): Float32Array {
 
   const magnitudes = new Float32Array(n / 2);
   for (let i = 0; i < magnitudes.length; i++) {
-    const re = real[i];
-    const im = imag[i];
+    const re = real[i]!;
+    const im = imag[i]!;
     magnitudes[i] = Math.sqrt(re * re + im * im);
   }
 
