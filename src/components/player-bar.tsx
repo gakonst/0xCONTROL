@@ -4,6 +4,7 @@ import { Loader2, Pause, Play } from "lucide-react";
 
 import { Track } from "@/data/tracks";
 import { cn } from "@/lib/utils";
+import { Waveform } from "./waveform";
 
 type PlayerBarProps = {
   track: Track;
@@ -116,17 +117,19 @@ export function PlayerBar({
         onPointerCancel={handlePointerCancel}
       >
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 flex-none items-center justify-center overflow-hidden border border-white/10 bg-white/5 text-sm font-semibold uppercase text-white/70">
-            {track.cover ? (
-              <img
-                src={track.cover}
-                alt={track.title}
-                className="h-full w-full object-cover"
+          <div className="flex h-12 w-12 flex-none items-center justify-center overflow-hidden">
+            {track.waveform ? (
+              <Waveform
+                waveData={track.waveform}
+                currentTime={elapsedSeconds}
+                className="h-full w-full"
               />
             ) : (
-              track.title.charAt(0).toUpperCase() ||
-              track.artist.charAt(0).toUpperCase() ||
-              "?"
+              <div className="flex h-full w-full items-center justify-center border border-white/10 bg-white/5 text-sm font-semibold uppercase text-white/70">
+                {track.title.charAt(0).toUpperCase() ||
+                  track.artist.charAt(0).toUpperCase() ||
+                  "?"}
+              </div>
             )}
           </div>
           <div className="min-w-0 flex-1">

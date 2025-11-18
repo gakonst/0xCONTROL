@@ -1,4 +1,6 @@
 import type { TrackAnnotation, TrackColor } from "@/types/annotations";
+import type { WaveData } from "@/types/waveform";
+import { getMockWaveform } from "./mock-waveforms";
 
 export type Track = {
   id: string;
@@ -8,6 +10,7 @@ export type Track = {
   key: string;
   duration: string;
   cover: string;
+  waveform?: WaveData;
   annotation?: TrackAnnotation;
 };
 
@@ -63,6 +66,7 @@ function convertCatalogRecordToTrack(
     key: record.key?.toUpperCase() || "--",
     duration: formatDurationFromSeconds(record.durationSeconds),
     cover: DEFAULT_COVER,
+    waveform: getMockWaveform(identifier),
     annotation: buildAnnotationFromRecord(record),
   };
 }

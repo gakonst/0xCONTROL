@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { Track } from "@/data/tracks";
+import { Waveform } from "./waveform";
 
 type FullScreenPlayerProps = {
   track: Track;
@@ -116,12 +117,13 @@ export function FullScreenPlayer({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gradient-to-b from-black via-[#100b1b] to-[#010308] text-white">
-      <div className="absolute inset-0 -z-10 opacity-40">
-        {track.cover ? (
-          <img
-            src={track.cover}
-            alt={track.title}
-            className="h-full w-full object-cover blur-3xl"
+      <div className="absolute inset-0 -z-10 opacity-50">
+        {track.waveform ? (
+          <Waveform
+            waveData={track.waveform}
+            currentTime={elapsedSeconds}
+            variant="flat"
+            className="h-full w-full"
           />
         ) : (
           <div className="h-full w-full bg-gradient-to-b from-black to-[#010308]" />
@@ -152,11 +154,11 @@ export function FullScreenPlayer({
 
       <div className="flex flex-1 flex-col items-center gap-6 px-6 pb-10 pt-8 text-center">
         <div className="relative flex h-64 w-64 items-center justify-center overflow-hidden rounded-2xl border border-white/20 bg-black/20 shadow-[0_25px_80px_rgba(0,0,0,0.65)] md:h-80 md:w-80">
-          {track.cover ? (
-            <img
-              src={track.cover}
-              alt={track.title}
-              className="h-full w-full object-cover"
+          {track.waveform ? (
+            <Waveform
+              waveData={track.waveform}
+              currentTime={elapsedSeconds}
+              className="h-full w-full"
             />
           ) : (
             <span className="text-5xl font-semibold uppercase text-white/60">
