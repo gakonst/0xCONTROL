@@ -7,6 +7,7 @@ export type FrequencyBands = {
 export type WaveformSegment = {
   amplitude: number;
   bands: FrequencyBands;
+  envelopes: FrequencyBands;
 };
 
 const MAX_SEGMENTS = 640;
@@ -44,17 +45,33 @@ export function extractWaveformFromAudioBuffer(
 
     const amplitude = computeRms(paddedSegment);
     const bands = computeFrequencyBands(paddedSegment, buffer.sampleRate);
-    segments.push({ amplitude, bands });
+    segments.push({ amplitude, bands, envelopes: bands });
     maxAmplitude = Math.max(maxAmplitude, amplitude);
   }
 
-  const normalizedSegments = segments.map((segment) => ({
-    amplitude: maxAmplitude > 0 ? segment.amplitude / maxAmplitude : 0,
-    bands: segment.bands,
-  }));
+  const normalizedSegments: WaveformSegment[] = segments.map((segment) => {
+    const amplitude = maxAmplitude > 0 ? segment.amplitude / maxAmplitude : 0;
+    return {
+      amplitude,
+      bands: segment.bands,
+      envelopes: {
+        low: amplitude * segment.bands.low,
+        mid: amplitude * segment.bands.mid,
+        high: amplitude * segment.bands.high,
+      },
+    };
+  });
+
+  const smoothedEnvelopes = smoothBandEnvelopes(
+    normalizedSegments.map((segment) => segment.envelopes),
+  );
 
   return {
-    segments: normalizedSegments,
+    segments: normalizedSegments.map((segment, index) => ({
+      amplitude: segment.amplitude,
+      bands: segment.bands,
+      envelopes: smoothedEnvelopes[index] ?? segment.envelopes,
+    })),
     durationSeconds: buffer.duration,
   };
 }
@@ -97,6 +114,63 @@ function computeFrequencyBands(
     mid: mid / total,
     high: high / total,
   };
+}
+
+function smoothBandEnvelopes(values: FrequencyBands[]): FrequencyBands[] {
+  if (!values.length) return [];
+  const low = values.map((value) => value.low);
+  const mid = values.map((value) => value.mid);
+  const high = values.map((value) => value.high);
+
+  const smoothedLow = smoothArray(low, 0.12, 0.04);
+  const smoothedMid = smoothArray(mid, 0.18, 0.06);
+  const smoothedHigh = smoothArray(high, 0.28, 0.1);
+
+  return values.map((_, index) => ({
+    low: smoothedLow[index] ?? 0,
+    mid: smoothedMid[index] ?? 0,
+    high: smoothedHigh[index] ?? 0,
+  }));
+}
+
+function smoothArray(
+  values: number[],
+  attack: number,
+  release: number,
+): number[] {
+  if (!values.length) return [];
+  const forward: number[] = new Array(values.length);
+  const backward: number[] = new Array(values.length);
+
+  let current = values[0];
+  forward[0] = current;
+  for (let index = 1; index < values.length; index++) {
+    const next = values[index];
+    const coefficient = next > current ? attack : release;
+    current = current + coefficient * (next - current);
+    forward[index] = current;
+  }
+
+  current = values[values.length - 1];
+  backward[values.length - 1] = current;
+  for (let index = values.length - 2; index >= 0; index--) {
+    const next = values[index];
+    const coefficient = next > current ? attack : release;
+    current = current + coefficient * (next - current);
+    backward[index] = current;
+  }
+
+  return values.map((_, index) => {
+    const smoothed = (forward[index]! + backward[index]!) / 2;
+    return clamp01(smoothed);
+  });
+}
+
+function clamp01(value: number): number {
+  if (Number.isNaN(value)) return 0;
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
 }
 
 function performFftMagnitudes(samples: Float32Array): Float32Array {
