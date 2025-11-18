@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { Track } from "@/data/tracks";
+import { WaveformVisualizer } from "@/components/waveform-visualizer";
 
 type FullScreenPlayerProps = {
   track: Track;
@@ -151,20 +152,13 @@ export function FullScreenPlayer({
       </header>
 
       <div className="flex flex-1 flex-col items-center gap-6 px-6 pb-10 pt-8 text-center">
-        <div className="relative flex h-64 w-64 items-center justify-center overflow-hidden rounded-2xl border border-white/20 bg-black/20 shadow-[0_25px_80px_rgba(0,0,0,0.65)] md:h-80 md:w-80">
-          {track.cover ? (
-            <img
-              src={track.cover}
-              alt={track.title}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <span className="text-5xl font-semibold uppercase text-white/60">
-              {track.title.charAt(0).toUpperCase() ||
-                track.artist.charAt(0).toUpperCase() ||
-                "?"}
-            </span>
-          )}
+        <div className="relative flex h-64 w-64 items-center justify-center md:h-80 md:w-80">
+          <WaveformVisualizer
+            trackId={track.id}
+            progress={progress}
+            variant="full"
+            className="h-full w-full rounded-2xl border border-white/30 bg-black/20 shadow-[0_25px_80px_rgba(0,0,0,0.65)]"
+          />
         </div>
 
         <div className="w-full max-w-xl">

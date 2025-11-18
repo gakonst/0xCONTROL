@@ -2,12 +2,14 @@ import { useMemo, useState } from "react";
 
 import { Track } from "@/data/tracks";
 import { cn } from "@/lib/utils";
+import { WaveformVisualizer } from "@/components/waveform-visualizer";
 
 type TrackListProps = {
   tracks: Track[];
   activeTrackId: string;
   onSelect: (track: Track) => void;
   className?: string;
+  activeProgress?: number;
 };
 
 const formatTotalDuration = (tracks: Track[]) => {
@@ -34,6 +36,7 @@ export function TrackList({
   activeTrackId,
   onSelect,
   className,
+  activeProgress = 0,
 }: TrackListProps) {
   const [sortField, setSortField] = useState<"title" | "bpm" | "key" | null>(
     null,
@@ -146,10 +149,6 @@ export function TrackList({
       <div className="flex-1 overflow-auto pb-6">
         {sortedTracks.map((track) => {
           const isActive = activeTrackId === track.id;
-          const fallbackInitial =
-            track.title.charAt(0).toUpperCase() ||
-            track.artist.charAt(0).toUpperCase() ||
-            "?";
 
           return (
             <button
@@ -163,18 +162,13 @@ export function TrackList({
               )}
             >
               <div className="flex items-center gap-2 text-xs font-medium tracking-tight text-muted-foreground">
-                <div className="h-8 w-8 flex-shrink-0 overflow-hidden border border-white/10 bg-white/5">
-                  {track.cover ? (
-                    <img
-                      src={track.cover}
-                      alt={track.title}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[0.65rem] font-semibold uppercase text-white/70">
-                      {fallbackInitial}
-                    </div>
-                  )}
+                <div className="h-10 w-16 flex-shrink-0">
+                  <WaveformVisualizer
+                    trackId={track.id}
+                    progress={isActive ? activeProgress : 0}
+                    variant="thumbnail"
+                    className="h-full w-full rounded-lg"
+                  />
                 </div>
               </div>
 

@@ -71,6 +71,18 @@ function App() {
     ? annotations[currentTrack.id]
     : undefined;
 
+  const playbackProgress = useMemo(() => {
+    if (!currentTrack) return 0;
+    const fallbackDuration = parseDurationStringToSeconds(
+      currentTrack.duration,
+    );
+    const totalDuration = durationSeconds ?? fallbackDuration;
+    if (!totalDuration || !Number.isFinite(totalDuration) || totalDuration <= 0) {
+      return 0;
+    }
+    return Math.min(elapsedSeconds / totalDuration, 1);
+  }, [currentTrack, durationSeconds, elapsedSeconds]);
+
   const goToTrackByOffset = useCallback(
     (offset: number) => {
       if (!currentTrack || tracks.length === 0) return;
@@ -402,6 +414,7 @@ function App() {
             tracks={tracks}
             activeTrackId={currentTrack?.id ?? ""}
             onSelect={handleTrackSelect}
+            activeProgress={playbackProgress}
           />
         </div>
       </div>
@@ -442,6 +455,15 @@ function App() {
       )}
     </div>
   );
+}
+
+function parseDurationStringToSeconds(duration?: string): number | null {
+  if (!duration) return null;
+  const [minutes, seconds] = duration.split(":").map((value) => Number(value) || 0);
+  if (Number.isFinite(minutes) && Number.isFinite(seconds)) {
+    return minutes * 60 + seconds;
+  }
+  return null;
 }
 
 export default App;
