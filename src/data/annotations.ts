@@ -1,4 +1,4 @@
-import { buildApiUrl } from "@/data/tracks";
+import { buildApiUrl } from "@/lib/api";
 import type { TrackAnnotation } from "@/types/annotations";
 
 export type UpdateTrackAnnotationPayload = Partial<TrackAnnotation>;
