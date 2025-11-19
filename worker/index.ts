@@ -88,6 +88,19 @@ type PlaylistTrackInput = {
   position?: number;
 };
 
+type PlaylistCreatePayload = {
+  title?: string;
+  description?: string;
+  mood?: string;
+  tags?: string[];
+  folderPath?: string[];
+  accentFrom?: string | null;
+  accentTo?: string | null;
+  cover?: string | null;
+  isPinned?: boolean;
+  isFavorite?: boolean;
+};
+
 export interface Env {
   ASSETS: Fetcher;
   SONG_PASSWORD: string;
@@ -148,6 +161,81 @@ app.get("/api/playlists", requireAuth, async (c) => {
     console.error("Failed to load playlists", error);
     return c.json({ playlists: [] }, 500);
   }
+});
+
+app.post("/api/playlists", requireAuth, async (c) => {
+  let payload: PlaylistCreatePayload | null = null;
+  try {
+    payload = (await c.req.json()) as PlaylistCreatePayload;
+  } catch {
+    return c.text("Invalid JSON payload", 400);
+  }
+
+  const title = typeof payload?.title === "string" ? payload.title.trim() : "";
+  if (!title) {
+    return c.text("Playlist title is required", 400);
+  }
+
+  const description =
+    typeof payload?.description === "string" ? payload.description.trim() : "";
+  const mood = typeof payload?.mood === "string" ? payload.mood.trim() : "";
+
+  const tags = normalizeStringArrayInput(payload?.tags);
+  const folderPath = normalizeStringArrayInput(payload?.folderPath);
+
+  const accentFrom = normalizeOptionalString(payload?.accentFrom);
+  const accentTo = normalizeOptionalString(payload?.accentTo);
+  const cover = normalizeOptionalString(payload?.cover);
+
+  const isPinned =
+    typeof payload?.isPinned === "boolean" && payload.isPinned ? 1 : 0;
+  const isFavorite =
+    typeof payload?.isFavorite === "boolean" && payload.isFavorite ? 1 : 0;
+
+  const playlistId = crypto.randomUUID();
+
+  const statement = `
+    INSERT INTO playlists (
+      id,
+      title,
+      description,
+      mood,
+      tags,
+      accent_from,
+      accent_to,
+      cover,
+      folder_path,
+      is_pinned,
+      is_favorite
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  const insert = await c.env.TRACKS_DB.prepare(statement)
+    .bind(
+      playlistId,
+      title,
+      description,
+      mood,
+      tags.length ? JSON.stringify(tags) : null,
+      accentFrom,
+      accentTo,
+      cover,
+      folderPath.length ? JSON.stringify(folderPath) : null,
+      isPinned,
+      isFavorite,
+    )
+    .run();
+
+  if (!insert.success) {
+    return c.text("Failed to create playlist", 500);
+  }
+
+  const playlist = await loadPlaylistById(c.env.TRACKS_DB, playlistId);
+  if (!playlist) {
+    return c.text("Playlist not found", 404);
+  }
+
+  return c.json({ playlist }, 201);
 });
 
 app.patch("/api/playlists/:playlistId", requireAuth, async (c) => {
@@ -566,6 +654,25 @@ function parseStringArray(value: string | null): string[] {
     // ignore malformed JSON
   }
   return [];
+}
+
+function normalizeStringArrayInput(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry.length > 0);
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
 }
 
 async function getNextPlaylistTrackPosition(
