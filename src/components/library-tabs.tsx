@@ -10,7 +10,7 @@ type LibraryTabsProps = {
 const TABS: Array<{ key: LibraryTabKey; label: string }> = [
   { key: "home", label: "Home" },
   { key: "playlists", label: "Playlists" },
-  { key: "create", label: "Create" },
+  { key: "create", label: "New" },
 ];
 
 export function LibraryTabs({ activeTab, onTabChange }: LibraryTabsProps) {

@@ -173,6 +173,17 @@ export function PlaylistBrowser({
     onSortReset();
   };
 
+  if (!playlists.length) {
+    return (
+      <section className="flex h-full flex-col items-center justify-center gap-2 border border-dashed border-white/10 bg-black/30 text-center text-sm text-muted-foreground">
+        <p>No playlists yet.</p>
+        <p className="text-xs text-white/60">
+          Use the Create tab below to start drafting one.
+        </p>
+      </section>
+    );
+  }
+
   const contentPlaylists = folderNavEnabled ? visiblePlaylists : sortedPlaylists;
 
   const pinnedPlaylists = useMemo(() => {
