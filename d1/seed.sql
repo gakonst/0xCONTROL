@@ -41,3 +41,76 @@ ON CONFLICT(track_id) DO UPDATE SET
   musical_key = excluded.musical_key,
   annotation_color = excluded.annotation_color,
   annotation_note = excluded.annotation_note;
+
+INSERT INTO playlists (
+  id,
+  title,
+  description,
+  mood,
+  tags,
+  accent_from,
+  accent_to,
+  folder_path,
+  is_pinned,
+  is_favorite
+) VALUES
+  (
+    'field-intel',
+    'Field Intel',
+    'Late-night rhythms that keep the monitors glowing after midnight mission briefs.',
+    'Afterhours drive',
+    '["percussion","sub-heavy","warehouse"]',
+    '#ff3d81',
+    '#f9b16e',
+    '["Ops","Field Kits"]',
+    1,
+    0
+  ),
+  (
+    'sunrise-bloom',
+    'Sunrise Bloom',
+    'Balearic-leaning selections for the comedown rehearsal when the lights finally come up.',
+    'Warm + euphoric',
+    '["balearic","organic","uplift"]',
+    '#4facfe',
+    '#00f2fe',
+    '["Mood Arcs"]',
+    0,
+    0
+  ),
+  (
+    'control-tests',
+    'Control Tests',
+    'Fresh uploads that still need a spin at full gain. QA the arrangements before release.',
+    'QA queue',
+    '["wip","rough mix"]',
+    '#a18cd1',
+    '#fbc2eb',
+    '["Ops","QA"]',
+    0,
+    0
+  )
+ON CONFLICT(id) DO UPDATE SET
+  title = excluded.title,
+  description = excluded.description,
+  mood = excluded.mood,
+  tags = excluded.tags,
+  accent_from = excluded.accent_from,
+  accent_to = excluded.accent_to,
+  folder_path = excluded.folder_path,
+  is_pinned = excluded.is_pinned,
+  is_favorite = excluded.is_favorite,
+  updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES
+  ('field-intel', 'Anyma, Argy, Son of Son - Voices In My Head.mp3', 1),
+  ('field-intel', 'Raxon - The Cage Of Love.mp3', 2),
+  ('field-intel', 'Rodriguez Jr. - Kids of Hula.mp3', 3),
+  ('sunrise-bloom', 'Polo & Pan - The Mirror.mp3', 1),
+  ('sunrise-bloom', 'Betical - Do It Again.mp3', 2),
+  ('sunrise-bloom', 'Mees Salomé, Joris Voorn, Celine Cairo - Fool''s Paradise - Joris Voorn Remix.mp3', 3),
+  ('control-tests', 'Grooverick 548.m4a', 1),
+  ('control-tests', 'DJ T., Emanuel Satie - Funk On You - Emanuel Satie Remix.mp3', 2),
+  ('control-tests', 'Marc DePulse, Rafael Cerato, Hadar, Malandra Jr. - Make a Show (Malandra Jr. Remix).mp3', 3)
+ON CONFLICT(playlist_id, track_id) DO UPDATE SET
+  position = excluded.position;

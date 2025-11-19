@@ -25,7 +25,12 @@ import {
 import { PlaylistCreatePanel } from "@/components/playlist-create-panel";
 import { LibraryTabs, type LibraryTabKey } from "@/components/library-tabs";
 import { updateTrackAnnotation } from "@/data/annotations";
-import { buildMockPlaylists } from "@/data/playlists";
+import {
+  addTrackToPlaylist as addTrackToPlaylistApi,
+  fetchPlaylists,
+  removeTrackFromPlaylist as removeTrackFromPlaylistApi,
+  updatePlaylistMeta,
+} from "@/data/playlists";
 import { fetchCatalogTracks, getTrackUrl, type Track } from "@/data/tracks";
 import { useMediaSession } from "@/hooks/use-media-session";
 import type { TrackAnnotation } from "@/types/annotations";
@@ -114,6 +119,14 @@ function App() {
   const emptyTracksRef = useRef<Track[]>([]);
   const tracks = fetchedTracks ?? emptyTracksRef.current;
 
+  const {
+    data: fetchedPlaylists,
+    refetch: refetchPlaylists,
+  } = useQuery({
+    queryKey: ["playlists"],
+    queryFn: ({ signal }) => fetchPlaylists(signal),
+  });
+
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [preferredPlaylistId, setPreferredPlaylistId] = useState<string | null>(
     null,
@@ -122,39 +135,24 @@ function App() {
   const [pendingQuickAddReturnView, setPendingQuickAddReturnView] =
     useState<LibraryView | null>(null);
 
-  useEffect(() => {
-    if (!tracks.length) {
-      setPlaylists([]);
-      return;
-    }
-
+  const applyRemotePlaylistUpdate = useCallback((updated: Playlist) => {
+    if (!updated) return;
     setPlaylists((previous) => {
-      if (!previous.length) {
-        return buildMockPlaylists(tracks);
+      const index = previous.findIndex((playlist) => playlist.id === updated.id);
+      if (index === -1) {
+        return previous;
       }
-
-      const availableTrackIds = new Set(tracks.map((track) => track.id));
-      let hasChanges = false;
-
-      const normalized = previous.map((playlist) => {
-        const filteredIds = playlist.trackIds.filter((trackId) =>
-          availableTrackIds.has(trackId),
-        );
-
-        if (filteredIds.length !== playlist.trackIds.length) {
-          hasChanges = true;
-          return {
-            ...playlist,
-            trackIds: filteredIds,
-          };
-        }
-
-        return playlist;
-      });
-
-      return hasChanges ? normalized : previous;
+      const next = [...previous];
+      next[index] = updated;
+      return next;
     });
-  }, [tracks]);
+  }, []);
+
+  useEffect(() => {
+    if (Array.isArray(fetchedPlaylists)) {
+      setPlaylists(fetchedPlaylists);
+    }
+  }, [fetchedPlaylists]);
 
   useEffect(() => {
     if (!playlists.length) {
@@ -200,10 +198,9 @@ function App() {
 
   const addTrackToPlaylist = useCallback(
     (playlistId: string, trackId: string) => {
-      let hasChanged = false;
-      setPlaylists((previous) => {
-        let mutated = false;
-        const next = previous.map((playlist) => {
+      let didAdd = false;
+      setPlaylists((previous) =>
+        previous.map((playlist) => {
           if (playlist.id !== playlistId) {
             return playlist;
           }
@@ -212,20 +209,28 @@ function App() {
             return playlist;
           }
 
-          mutated = true;
-          hasChanged = true;
+          didAdd = true;
           return {
             ...playlist,
             trackIds: [...playlist.trackIds, trackId],
           };
-        });
+        }),
+      );
 
-        return mutated ? next : previous;
-      });
+      if (didAdd) {
+        void addTrackToPlaylistApi(playlistId, trackId)
+          .then((updated) => {
+            applyRemotePlaylistUpdate(updated);
+          })
+          .catch((error) => {
+            console.error("Failed to add track to playlist", error);
+            void refetchPlaylists();
+          });
+      }
 
-      return hasChanged;
+      return didAdd;
     },
-    [],
+    [applyRemotePlaylistUpdate, refetchPlaylists],
   );
 
   const handleQuickAddToPlaylist = useCallback(
@@ -258,32 +263,65 @@ function App() {
     ],
   );
 
-  const togglePlaylistPin = useCallback((playlistId: string) => {
-    setPlaylists((previous) =>
-      previous.map((playlist) =>
-        playlist.id === playlistId
-          ? { ...playlist, isPinned: !playlist.isPinned }
-          : playlist,
-      ),
-    );
-  }, []);
+  const togglePlaylistPin = useCallback(
+    (playlistId: string) => {
+      let nextPinned: boolean | null = null;
+      setPlaylists((previous) =>
+        previous.map((playlist) => {
+          if (playlist.id !== playlistId) {
+            return playlist;
+          }
+          nextPinned = !playlist.isPinned;
+          return { ...playlist, isPinned: nextPinned };
+        }),
+      );
 
-  const togglePlaylistFavorite = useCallback((playlistId: string) => {
-    setPlaylists((previous) =>
-      previous.map((playlist) =>
-        playlist.id === playlistId
-          ? { ...playlist, isFavorite: !playlist.isFavorite }
-          : playlist,
-      ),
-    );
-  }, []);
+      if (nextPinned === null) {
+        return;
+      }
+
+      void updatePlaylistMeta(playlistId, { isPinned: nextPinned })
+        .then((updated) => applyRemotePlaylistUpdate(updated))
+        .catch((error) => {
+          console.error("Failed to update playlist pin state", error);
+          void refetchPlaylists();
+        });
+    },
+    [applyRemotePlaylistUpdate, refetchPlaylists],
+  );
+
+  const togglePlaylistFavorite = useCallback(
+    (playlistId: string) => {
+      let nextFavorite: boolean | null = null;
+      setPlaylists((previous) =>
+        previous.map((playlist) => {
+          if (playlist.id !== playlistId) {
+            return playlist;
+          }
+          nextFavorite = !playlist.isFavorite;
+          return { ...playlist, isFavorite: nextFavorite };
+        }),
+      );
+
+      if (nextFavorite === null) {
+        return;
+      }
+
+      void updatePlaylistMeta(playlistId, { isFavorite: nextFavorite })
+        .then((updated) => applyRemotePlaylistUpdate(updated))
+        .catch((error) => {
+          console.error("Failed to update playlist favorite state", error);
+          void refetchPlaylists();
+        });
+    },
+    [applyRemotePlaylistUpdate, refetchPlaylists],
+  );
 
   const removeTrackFromPlaylist = useCallback(
     (playlistId: string, trackId: string) => {
-      let hasChanged = false;
-      setPlaylists((previous) => {
-        let mutated = false;
-        const next = previous.map((playlist) => {
+      let didRemove = false;
+      setPlaylists((previous) =>
+        previous.map((playlist) => {
           if (playlist.id !== playlistId) {
             return playlist;
           }
@@ -292,20 +330,26 @@ function App() {
             return playlist;
           }
 
-          mutated = true;
-          hasChanged = true;
+          didRemove = true;
           return {
             ...playlist,
             trackIds: playlist.trackIds.filter((id) => id !== trackId),
           };
-        });
+        }),
+      );
 
-        return mutated ? next : previous;
-      });
+      if (didRemove) {
+        void removeTrackFromPlaylistApi(playlistId, trackId)
+          .then((updated) => applyRemotePlaylistUpdate(updated))
+          .catch((error) => {
+            console.error("Failed to remove track from playlist", error);
+            void refetchPlaylists();
+          });
+      }
 
-      return hasChanged;
+      return didRemove;
     },
-    [],
+    [applyRemotePlaylistUpdate, refetchPlaylists],
   );
 
   useEffect(() => {

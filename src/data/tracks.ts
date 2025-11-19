@@ -1,3 +1,4 @@
+import { buildApiUrl } from "@/lib/api";
 import type { TrackAnnotation, TrackColor } from "@/types/annotations";
 
 export type Track = {
@@ -28,8 +29,6 @@ type CatalogResponse = {
 };
 
 const DEFAULT_COVER = "";
-const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 const SHOULD_USE_LOCAL_TRACKS =
   (import.meta.env.VITE_USE_LOCAL_TRACKS as string | undefined) === "true";
 const LOCAL_TRACK_MANIFEST_PATH =
@@ -175,14 +174,4 @@ export function getTrackUrl(trackId: string): string {
   }
 
   return buildApiUrl(`/api/tracks/${encodedId}`);
-}
-
-export function buildApiUrl(path: string): string {
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  if (!API_BASE_URL) {
-    return normalizedPath;
-  }
-
-  const trimmedBase = API_BASE_URL.replace(/\/+$/, "");
-  return `${trimmedBase}${normalizedPath}`;
 }

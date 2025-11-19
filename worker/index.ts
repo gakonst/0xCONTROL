@@ -39,6 +39,55 @@ type TrackAnnotationUpdatePayload = {
   note?: string | null;
 };
 
+interface PlaylistRow {
+  id: string;
+  title: string;
+  description: string;
+  mood: string;
+  tags: string | null;
+  accent_from: string | null;
+  accent_to: string | null;
+  cover: string | null;
+  folder_path: string | null;
+  is_pinned: number | null;
+  is_favorite: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface PlaylistTrackRow {
+  playlist_id: string;
+  track_id: string;
+  position: number;
+}
+
+interface PlaylistRecord {
+  id: string;
+  title: string;
+  description: string;
+  mood: string;
+  tags: string[];
+  accentFrom?: string;
+  accentTo?: string;
+  cover?: string;
+  folderPath: string[];
+  isPinned: boolean;
+  isFavorite: boolean;
+  createdAt: string;
+  updatedAt: string;
+  trackIds: string[];
+}
+
+type PlaylistMetaUpdatePayload = {
+  isPinned?: boolean;
+  isFavorite?: boolean;
+};
+
+type PlaylistTrackInput = {
+  trackId?: string;
+  position?: number;
+};
+
 export interface Env {
   ASSETS: Fetcher;
   SONG_PASSWORD: string;
@@ -65,7 +114,7 @@ app.use(
   "/api/*",
   cors({
     origin: (origin) => origin ?? "*",
-    allowMethods: ["GET", "OPTIONS", "PATCH"],
+    allowMethods: ["GET", "OPTIONS", "PATCH", "POST", "DELETE"],
     allowHeaders: ["Content-Type"],
   }),
 );
@@ -88,6 +137,161 @@ app.get("/api/catalog", requireAuth, async (c) => {
     "Cache-Control": "no-store",
   });
 });
+
+app.get("/api/playlists", requireAuth, async (c) => {
+  try {
+    const playlists = await loadPlaylistsFromDb(c.env.TRACKS_DB);
+    return c.json({ playlists }, 200, {
+      "Cache-Control": "no-store",
+    });
+  } catch (error) {
+    console.error("Failed to load playlists", error);
+    return c.json({ playlists: [] }, 500);
+  }
+});
+
+app.patch("/api/playlists/:playlistId", requireAuth, async (c) => {
+  const playlistId = c.req.param("playlistId");
+  if (!playlistId) {
+    return c.text("Playlist identifier is required", 400);
+  }
+
+  let payload: PlaylistMetaUpdatePayload | null = null;
+  try {
+    payload = (await c.req.json()) as PlaylistMetaUpdatePayload;
+  } catch {
+    return c.text("Invalid JSON payload", 400);
+  }
+
+  if (!payload) {
+    return c.text("No updates provided", 400);
+  }
+
+  const setStatements: string[] = [];
+  const parameters: Array<number | string> = [];
+
+  if (Object.prototype.hasOwnProperty.call(payload, "isPinned")) {
+    const normalizedPinned =
+      payload.isPinned === undefined ? undefined : payload.isPinned ? 1 : 0;
+    if (normalizedPinned !== undefined) {
+      setStatements.push("is_pinned = ?");
+      parameters.push(normalizedPinned);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "isFavorite")) {
+    const normalizedFavorite =
+      payload.isFavorite === undefined ? undefined : payload.isFavorite ? 1 : 0;
+    if (normalizedFavorite !== undefined) {
+      setStatements.push("is_favorite = ?");
+      parameters.push(normalizedFavorite);
+    }
+  }
+
+  if (!setStatements.length) {
+    return c.text("No updates provided", 400);
+  }
+
+  setStatements.push("updated_at = CURRENT_TIMESTAMP");
+
+  const update = await c.env.TRACKS_DB.prepare(
+    `UPDATE playlists SET ${setStatements.join(", ")} WHERE id = ?`,
+  )
+    .bind(...parameters, playlistId)
+    .run();
+
+  if (!update.success || update.changes === 0) {
+    return c.text("Playlist not found", 404);
+  }
+
+  const playlist = await loadPlaylistById(c.env.TRACKS_DB, playlistId);
+  if (!playlist) {
+    return c.text("Playlist not found", 404);
+  }
+
+  return c.json({ playlist });
+});
+
+app.post("/api/playlists/:playlistId/tracks", requireAuth, async (c) => {
+  const playlistId = c.req.param("playlistId");
+  if (!playlistId) {
+    return c.text("Playlist identifier is required", 400);
+  }
+
+  let payload: PlaylistTrackInput | null = null;
+  try {
+    payload = (await c.req.json()) as PlaylistTrackInput;
+  } catch {
+    return c.text("Invalid JSON payload", 400);
+  }
+
+  const trackId = payload?.trackId;
+  if (!trackId) {
+    return c.text("Track identifier is required", 400);
+  }
+
+  let normalizedPosition: number;
+  if (typeof payload?.position === "number" && !Number.isNaN(payload.position)) {
+    normalizedPosition = payload.position;
+  } else {
+    normalizedPosition = await getNextPlaylistTrackPosition(
+      c.env.TRACKS_DB,
+      playlistId,
+    );
+  }
+
+  const insert = await c.env.TRACKS_DB.prepare(
+    `
+      INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position)
+      VALUES (?, ?, ?)
+    `,
+  )
+    .bind(playlistId, trackId, normalizedPosition)
+    .run();
+
+  if (!insert.success) {
+    return c.text("Failed to add track to playlist", 500);
+  }
+
+  await touchPlaylistUpdatedAt(c.env.TRACKS_DB, playlistId);
+  const playlist = await loadPlaylistById(c.env.TRACKS_DB, playlistId);
+  if (!playlist) {
+    return c.text("Playlist not found", 404);
+  }
+
+  return c.json({ playlist });
+});
+
+app.delete(
+  "/api/playlists/:playlistId/tracks/:trackId",
+  requireAuth,
+  async (c) => {
+    const playlistId = c.req.param("playlistId");
+    const trackId = c.req.param("trackId");
+
+    if (!playlistId || !trackId) {
+      return c.text("Playlist and track identifiers are required", 400);
+    }
+
+    const removal = await c.env.TRACKS_DB.prepare(
+      "DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?",
+    )
+      .bind(playlistId, trackId)
+      .run();
+
+    if (!removal.success || removal.changes === 0) {
+      return c.text("Track not found in playlist", 404);
+    }
+
+    await touchPlaylistUpdatedAt(c.env.TRACKS_DB, playlistId);
+    const playlist = await loadPlaylistById(c.env.TRACKS_DB, playlistId);
+    if (!playlist) {
+      return c.text("Playlist not found", 404);
+    }
+
+    return c.json({ playlist });
+  },
+);
 
 app.patch("/api/tracks/:trackId/annotation", requireAuth, async (c) => {
   const trackId = c.req.param("trackId");
@@ -263,6 +467,130 @@ function convertMetadataRowToTrack(row: TrackMetadataRow): TrackRecord {
     annotationColor: row.annotation_color ?? null,
     annotationNote: row.annotation_note ?? null,
   };
+}
+
+async function loadPlaylistsFromDb(
+  db: D1Database,
+  playlistId?: string,
+): Promise<PlaylistRecord[]> {
+  const baseQuery = `
+    SELECT
+      id,
+      title,
+      description,
+      mood,
+      tags,
+      accent_from,
+      accent_to,
+      cover,
+      folder_path,
+      is_pinned,
+      is_favorite,
+      created_at,
+      updated_at
+    FROM playlists
+    ${playlistId ? "WHERE id = ?" : ""}
+    ORDER BY created_at DESC
+  `;
+
+  const statement = playlistId
+    ? db.prepare(baseQuery).bind(playlistId)
+    : db.prepare(baseQuery);
+
+  const { results } = await statement.all<PlaylistRow>();
+  const rows = results ?? [];
+  if (!rows.length) {
+    return [];
+  }
+
+  const playlistIds = rows.map((row) => row.id);
+  const placeholders = playlistIds.map(() => "?").join(", ");
+
+  const trackStatement = db.prepare(
+    `SELECT playlist_id, track_id, position FROM playlist_tracks WHERE playlist_id IN (${placeholders}) ORDER BY position ASC`,
+  );
+  const trackResults = await trackStatement
+    .bind(...playlistIds)
+    .all<PlaylistTrackRow>();
+
+  const trackMap = new Map<string, string[]>();
+  for (const row of trackResults.results ?? []) {
+    const next = trackMap.get(row.playlist_id) ?? [];
+    next.push(row.track_id);
+    trackMap.set(row.playlist_id, next);
+  }
+
+  return rows.map((row) =>
+    mapPlaylistRow(row, trackMap.get(row.id) ?? []),
+  );
+}
+
+async function loadPlaylistById(
+  db: D1Database,
+  playlistId: string,
+): Promise<PlaylistRecord | null> {
+  const playlists = await loadPlaylistsFromDb(db, playlistId);
+  return playlists[0] ?? null;
+}
+
+function mapPlaylistRow(
+  row: PlaylistRow,
+  trackIds: string[],
+): PlaylistRecord {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    mood: row.mood,
+    tags: parseStringArray(row.tags),
+    accentFrom: row.accent_from ?? undefined,
+    accentTo: row.accent_to ?? undefined,
+    cover: row.cover ?? undefined,
+    folderPath: parseStringArray(row.folder_path),
+    isPinned: Boolean(row.is_pinned),
+    isFavorite: Boolean(row.is_favorite),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    trackIds,
+  };
+}
+
+function parseStringArray(value: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.map((entry) => String(entry));
+    }
+  } catch {
+    // ignore malformed JSON
+  }
+  return [];
+}
+
+async function getNextPlaylistTrackPosition(
+  db: D1Database,
+  playlistId: string,
+): Promise<number> {
+  const row = await db
+    .prepare(
+      "SELECT COALESCE(MAX(position), 0) AS max_position FROM playlist_tracks WHERE playlist_id = ?",
+    )
+    .bind(playlistId)
+    .first<{ max_position: number | null }>();
+
+  const maxPosition = row?.max_position ?? 0;
+  return maxPosition + 1;
+}
+
+async function touchPlaylistUpdatedAt(
+  db: D1Database,
+  playlistId: string,
+): Promise<void> {
+  await db
+    .prepare("UPDATE playlists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(playlistId)
+    .run();
 }
 
 async function serveAssets(request: Request, env: Env): Promise<Response> {
