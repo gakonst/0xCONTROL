@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { PlayerBar } from "@/components/player-bar";
@@ -23,11 +31,24 @@ import { useMediaSession } from "@/hooks/use-media-session";
 import type { TrackAnnotation } from "@/types/annotations";
 import type { Playlist } from "@/types/playlists";
 
+type PlaylistsView = { type: "playlists"; folderPath: string[] };
+type PlaylistDetailView = {
+  type: "playlistDetail";
+  playlistId: string;
+  folderPath: string[];
+};
+
 type LibraryView =
   | { type: "home" }
-  | { type: "playlists" }
-  | { type: "playlistDetail"; playlistId: string }
+  | PlaylistsView
+  | PlaylistDetailView
   | { type: "create" };
+
+type PrimaryLibraryView = { type: "home" } | PlaylistsView | { type: "create" };
+
+const RAW_APP_BASE_PATH = (import.meta.env.BASE_URL ?? "/") as string;
+const APP_BASE_PATH =
+  RAW_APP_BASE_PATH === "/" ? "" : RAW_APP_BASE_PATH.replace(/\/+$/, "");
 
 type ParsedUrlState = {
   view: LibraryView;
@@ -42,6 +63,12 @@ type ParsedUrlState = {
 
 function App() {
   const initialUrlState = getInitialUrlState();
+  const initialPrimaryView: PrimaryLibraryView =
+    initialUrlState.view.type === "playlistDetail"
+      ? { type: "playlists", folderPath: initialUrlState.view.folderPath }
+      : initialUrlState.view.type === "playlists"
+        ? initialUrlState.view
+        : initialUrlState.view;
   const [currentTrackId, setCurrentTrackId] = useState(
     initialUrlState.trackId ?? "",
   );
@@ -56,6 +83,8 @@ function App() {
   const [libraryView, setLibraryView] = useState<LibraryView>(
     initialUrlState.view,
   );
+  const [previousPrimaryView, setPreviousPrimaryView] =
+    useState<PrimaryLibraryView>(initialPrimaryView);
   const [trackSortField, setTrackSortField] = useState<TrackSortField>(
     initialUrlState.trackSortField,
   );
@@ -74,20 +103,24 @@ function App() {
       { timeoutId: ReturnType<typeof setTimeout>; note: string }
     >(),
   );
-  const basePathRef = useRef(initialUrlState.pathname);
   const lastSyncedUrlRef = useRef(initialUrlState.href);
   const isHandlingPopStateRef = useRef(false);
   const hasSyncedOnceRef = useRef(false);
 
-  const { data: tracks = [] } = useQuery({
+  const { data: fetchedTracks } = useQuery({
     queryKey: ["catalog"],
     queryFn: ({ signal }) => fetchCatalogTracks(signal),
   });
+  const emptyTracksRef = useRef<Track[]>([]);
+  const tracks = fetchedTracks ?? emptyTracksRef.current;
 
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [preferredPlaylistId, setPreferredPlaylistId] = useState<string | null>(
     null,
   );
+  const [pendingQuickAddTrackId, setPendingQuickAddTrackId] = useState<string | null>(null);
+  const [pendingQuickAddReturnView, setPendingQuickAddReturnView] =
+    useState<LibraryView | null>(null);
 
   useEffect(() => {
     if (!tracks.length) {
@@ -125,12 +158,21 @@ function App() {
 
   useEffect(() => {
     if (!playlists.length) {
-      setPreferredPlaylistId(null);
+      if (preferredPlaylistId !== null) {
+        setPreferredPlaylistId(null);
+      }
       return;
     }
 
-    if (!preferredPlaylistId) {
-      setPreferredPlaylistId(playlists[0].id);
+    if (
+      preferredPlaylistId &&
+      playlists.some((playlist) => playlist.id === preferredPlaylistId)
+    ) {
+      return;
+    }
+
+    if (preferredPlaylistId !== null) {
+      setPreferredPlaylistId(null);
     }
   }, [playlists, preferredPlaylistId]);
 
@@ -153,7 +195,7 @@ function App() {
       }
     }
 
-    return playlists[0] ?? null;
+    return null;
   }, [libraryView, activePlaylist, preferredPlaylistId, playlists]);
 
   const addTrackToPlaylist = useCallback(
@@ -186,6 +228,56 @@ function App() {
     [],
   );
 
+  const handleQuickAddToPlaylist = useCallback(
+    (trackId: string) => {
+      if (quickAddTargetPlaylist) {
+        return addTrackToPlaylist(quickAddTargetPlaylist.id, trackId);
+      }
+
+      if (!playlists.length) {
+        return false;
+      }
+
+      setPendingQuickAddTrackId(trackId);
+      setPendingQuickAddReturnView(libraryView);
+      if (libraryView.type !== "playlists") {
+        const fallbackFolderPath =
+          previousPrimaryView.type === "playlists"
+            ? previousPrimaryView.folderPath
+            : [];
+        setLibraryView({ type: "playlists", folderPath: fallbackFolderPath });
+      }
+      return true;
+    },
+    [
+      quickAddTargetPlaylist,
+      addTrackToPlaylist,
+      playlists.length,
+      libraryView,
+      previousPrimaryView,
+    ],
+  );
+
+  const togglePlaylistPin = useCallback((playlistId: string) => {
+    setPlaylists((previous) =>
+      previous.map((playlist) =>
+        playlist.id === playlistId
+          ? { ...playlist, isPinned: !playlist.isPinned }
+          : playlist,
+      ),
+    );
+  }, []);
+
+  const togglePlaylistFavorite = useCallback((playlistId: string) => {
+    setPlaylists((previous) =>
+      previous.map((playlist) =>
+        playlist.id === playlistId
+          ? { ...playlist, isFavorite: !playlist.isFavorite }
+          : playlist,
+      ),
+    );
+  }, []);
+
   const removeTrackFromPlaylist = useCallback(
     (playlistId: string, trackId: string) => {
       let hasChanged = false;
@@ -217,17 +309,46 @@ function App() {
   );
 
   useEffect(() => {
-    if (libraryView.type === "playlistDetail" && !activePlaylist) {
-      setLibraryView({ type: "playlists" });
+    if (libraryView.type !== "playlistDetail") {
+      return;
     }
-  }, [libraryView, activePlaylist]);
+    if (!playlists.length) {
+      return;
+    }
+    const exists = playlists.some(
+      (playlist) => playlist.id === libraryView.playlistId,
+    );
+    if (!exists) {
+      setLibraryView({
+        type: "playlists",
+        folderPath: libraryView.folderPath,
+      });
+    }
+  }, [libraryView, playlists]);
+
+  useEffect(() => {
+    if (libraryView.type === "playlistDetail") {
+      return;
+    }
+    setPreviousPrimaryView(libraryView);
+  }, [libraryView]);
+
+  useEffect(() => {
+    if (!pendingQuickAddTrackId) {
+      return;
+    }
+    if (libraryView.type === "playlists") {
+      return;
+    }
+    setPendingQuickAddTrackId(null);
+    setPendingQuickAddReturnView(null);
+  }, [libraryView, pendingQuickAddTrackId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handlePopState = () => {
       isHandlingPopStateRef.current = true;
       const parsed = parseUrlStateFromLocation(window.location);
-      basePathRef.current = window.location.pathname;
       lastSyncedUrlRef.current =
         window.location.pathname + window.location.search;
       setLibraryView(parsed.view);
@@ -247,7 +368,6 @@ function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const nextUrl = buildUrlWithState(
-      basePathRef.current,
       libraryView,
       currentTrackId,
       trackSortField,
@@ -277,6 +397,10 @@ function App() {
     playlistSortDirection,
   ]);
 
+  const handleExitPlaylistDetail = useCallback(() => {
+    setLibraryView(previousPrimaryView);
+  }, [previousPrimaryView]);
+
   const visibleTracks = useMemo(() => {
     if (libraryView.type === "playlistDetail" && activePlaylist) {
       const playlistTrackIds = new Set(activePlaylist.trackIds);
@@ -285,10 +409,23 @@ function App() {
     return tracks;
   }, [tracks, libraryView, activePlaylist]);
 
+  const previousLevelLabel =
+    previousPrimaryView.type === "home"
+      ? "Home"
+      : previousPrimaryView.type === "create"
+        ? "Create"
+        : previousPrimaryView.folderPath.length
+          ? previousPrimaryView.folderPath.join(" / ")
+          : "All playlists";
+
   const trackListHeader =
     libraryView.type === "playlistDetail" && activePlaylist
       ? {
           title: activePlaylist.title,
+          backLabel: "Up one level",
+          backDestinationLabel: previousLevelLabel,
+          onBack: handleExitPlaylistDetail,
+          showFullBackRow: true,
         }
       : undefined;
 
@@ -301,9 +438,6 @@ function App() {
 
   useEffect(() => {
     if (!tracks.length) {
-      if (currentTrackId !== "") {
-        setCurrentTrackId("");
-      }
       return;
     }
 
@@ -636,10 +770,38 @@ function App() {
     setIsFullScreenPlayerOpen(false);
   }, []);
 
-  const handlePlaylistSelect = useCallback((playlistId: string) => {
-    setPreferredPlaylistId(playlistId);
-    setLibraryView({ type: "playlistDetail", playlistId });
-  }, []);
+  const handlePlaylistSelect = useCallback(
+    (playlistId: string) => {
+      setPreferredPlaylistId(playlistId);
+      const targetPlaylist = playlists.find(
+        (playlist) => playlist.id === playlistId,
+      );
+      const targetFolderPath = targetPlaylist?.folderPath ?? [];
+
+      if (pendingQuickAddTrackId) {
+        const trackId = pendingQuickAddTrackId;
+        setPendingQuickAddTrackId(null);
+        setPendingQuickAddReturnView(null);
+        void addTrackToPlaylist(playlistId, trackId);
+        const destination =
+          pendingQuickAddReturnView ?? ({ type: "home" } as LibraryView);
+        setLibraryView(destination);
+        return;
+      }
+
+      setLibraryView({
+        type: "playlistDetail",
+        playlistId,
+        folderPath: targetFolderPath,
+      });
+    },
+    [
+      playlists,
+      pendingQuickAddTrackId,
+      pendingQuickAddReturnView,
+      addTrackToPlaylist,
+    ],
+  );
 
   const handleTrackSortChange = useCallback(
     (field: TrackSortField, direction: TrackSortDirection) => {
@@ -667,17 +829,46 @@ function App() {
     setPlaylistSortDirection("asc");
   }, []);
 
-  const handleTabChange = useCallback((tab: LibraryTabKey) => {
-    if (tab === "home") {
-      setLibraryView({ type: "home" });
-      return;
-    }
-    if (tab === "playlists") {
-      setLibraryView({ type: "playlists" });
-      return;
-    }
-    setLibraryView({ type: "create" });
+  const handleFolderPathChange = useCallback<
+    Dispatch<SetStateAction<string[]>>
+  >((nextPath) => {
+    setLibraryView((current) => {
+      if (current.type !== "playlists") {
+        return current;
+      }
+      const resolved =
+        typeof nextPath === "function" ? nextPath(current.folderPath) : nextPath;
+      const hasChanged =
+        resolved.length !== current.folderPath.length ||
+        resolved.some((segment, index) => segment !== current.folderPath[index]);
+      if (!hasChanged) {
+        return current;
+      }
+      return {
+        ...current,
+        folderPath: resolved,
+      };
+    });
   }, []);
+
+  const handleTabChange = useCallback(
+    (tab: LibraryTabKey) => {
+      if (tab === "home") {
+        setLibraryView({ type: "home" });
+        return;
+      }
+      if (tab === "playlists") {
+        const folderPath =
+          previousPrimaryView.type === "playlists"
+            ? previousPrimaryView.folderPath
+            : [];
+        setLibraryView({ type: "playlists", folderPath });
+        return;
+      }
+      setLibraryView({ type: "create" });
+    },
+    [previousPrimaryView],
+  );
 
   const handleOpenFullScreen = useCallback(() => {
     setIsFullScreenPlayerOpen(true);
@@ -712,10 +903,14 @@ function App() {
               playlists={playlists}
               tracks={tracks}
               onSelect={handlePlaylistSelect}
+              folderPath={libraryView.folderPath}
+              onFolderPathChange={handleFolderPathChange}
               sortField={playlistSortField}
               sortDirection={playlistSortDirection}
               onSortChange={handlePlaylistSortChange}
               onSortReset={handlePlaylistSortReset}
+              onTogglePin={togglePlaylistPin}
+              onToggleFavorite={togglePlaylistFavorite}
             />
           ) : libraryView.type === "create" ? (
             <PlaylistCreatePanel />
@@ -731,12 +926,7 @@ function App() {
               onSortChange={handleTrackSortChange}
               onSortReset={handleTrackSortReset}
               quickAddLabel={quickAddTargetPlaylist?.title}
-              onQuickAddToPlaylist={
-                quickAddTargetPlaylist
-                  ? (trackId) =>
-                      addTrackToPlaylist(quickAddTargetPlaylist.id, trackId)
-                  : undefined
-              }
+              onQuickAddToPlaylist={handleQuickAddToPlaylist}
               quickRemoveLabel={
                 libraryView.type === "playlistDetail" && activePlaylist
                   ? activePlaylist.title
@@ -811,29 +1001,11 @@ function getInitialUrlState(): ParsedUrlState {
 
 function parseUrlStateFromLocation(location: Location): ParsedUrlState {
   const params = new URLSearchParams(location.search);
-  const viewParam = params.get("view");
-  let view: LibraryView = { type: "home" };
+  const relativePath = stripBasePath(location.pathname);
+  let view = parseViewFromPath(relativePath);
 
-  switch (viewParam) {
-    case "playlists":
-      view = { type: "playlists" };
-      break;
-    case "create":
-      view = { type: "create" };
-      break;
-    case "playlist": {
-      const playlistId = params.get("playlistId");
-      if (playlistId) {
-        view = { type: "playlistDetail", playlistId };
-      } else {
-        view = { type: "playlists" };
-      }
-      break;
-    }
-    case "home":
-    default:
-      view = { type: "home" };
-      break;
+  if (!view) {
+    view = parseViewFromLegacyParams(params.get("view"), params);
   }
 
   const trackId = params.get("trackId") ?? undefined;
@@ -857,7 +1029,6 @@ function parseUrlStateFromLocation(location: Location): ParsedUrlState {
 }
 
 function buildUrlWithState(
-  pathname: string,
   view: LibraryView,
   trackId: string,
   trackSortField: TrackSortField,
@@ -866,15 +1037,6 @@ function buildUrlWithState(
   playlistSortDirection: PlaylistSortDirection,
 ): string {
   const params = new URLSearchParams();
-
-  if (view.type !== "home") {
-    if (view.type === "playlistDetail") {
-      params.set("view", "playlist");
-      params.set("playlistId", view.playlistId);
-    } else {
-      params.set("view", view.type);
-    }
-  }
 
   if (trackId) {
     params.set("trackId", trackId);
@@ -888,8 +1050,10 @@ function buildUrlWithState(
     params.set("playlistSort", `${playlistSortField}-${playlistSortDirection}`);
   }
 
+  const path = buildPathForView(view);
   const query = params.toString();
-  return query ? `${pathname}?${query}` : pathname;
+  const relativeUrl = query ? `${path}?${query}` : path;
+  return prependBasePath(relativeUrl);
 }
 
 function parseTrackSortParam(
@@ -950,6 +1114,137 @@ function parsePlaylistSortParam(
   }
 
   return { field, direction };
+}
+
+function parseViewFromPath(pathname: string): LibraryView | null {
+  const normalized = pathname || "/";
+  const hasTrailingSlash =
+    normalized.length > 1 && normalized.endsWith("/");
+  const segments = normalized.split("/").filter(Boolean);
+
+  if (!segments.length) {
+    return { type: "home" };
+  }
+
+  const [first, ...rest] = segments;
+
+  if (first === "create") {
+    return { type: "create" };
+  }
+
+  if (first !== "playlists") {
+    return null;
+  }
+
+  if (!rest.length) {
+    return { type: "playlists", folderPath: [] };
+  }
+
+  if (hasTrailingSlash) {
+    return {
+      type: "playlists",
+      folderPath: rest.map(decodePathSegment),
+    };
+  }
+
+  if (rest.length === 0) {
+    return { type: "playlists", folderPath: [] };
+  }
+
+  const folderSegments = rest.slice(0, -1).map(decodePathSegment);
+  const playlistSegment = rest[rest.length - 1];
+
+  return {
+    type: "playlistDetail",
+    playlistId: decodePathSegment(playlistSegment),
+    folderPath: folderSegments,
+  };
+}
+
+function parseViewFromLegacyParams(
+  viewParam: string | null,
+  params: URLSearchParams,
+): LibraryView {
+  switch (viewParam) {
+    case "playlists":
+      return { type: "playlists", folderPath: [] };
+    case "create":
+      return { type: "create" };
+    case "playlist": {
+      const playlistId = params.get("playlistId");
+      if (playlistId) {
+        return { type: "playlistDetail", playlistId, folderPath: [] };
+      }
+      return { type: "playlists", folderPath: [] };
+    }
+    case "home":
+    default:
+      return { type: "home" };
+  }
+}
+
+function buildPathForView(view: LibraryView): string {
+  switch (view.type) {
+    case "home":
+      return "/";
+    case "create":
+      return "/create";
+    case "playlists": {
+      const encodedSegments = view.folderPath.map(encodePathSegment);
+      const base = encodedSegments.length
+        ? `/playlists/${encodedSegments.join("/")}`
+        : "/playlists";
+      return encodedSegments.length ? `${base}/` : base;
+    }
+    case "playlistDetail": {
+      const folderSegments = view.folderPath.map(encodePathSegment);
+      const base = folderSegments.length
+        ? `/playlists/${folderSegments.join("/")}`
+        : "/playlists";
+      const playlistSegment = encodePathSegment(view.playlistId);
+      return `${base}/${playlistSegment}`;
+    }
+    default:
+      return "/";
+  }
+}
+
+function stripBasePath(pathname: string): string {
+  const normalizedPath = pathname || "/";
+  if (!APP_BASE_PATH) {
+    return normalizedPath;
+  }
+  if (normalizedPath === APP_BASE_PATH) {
+    return "/";
+  }
+  const prefix = `${APP_BASE_PATH}/`;
+  if (normalizedPath.startsWith(prefix)) {
+    const remainder = normalizedPath.slice(APP_BASE_PATH.length);
+    return remainder || "/";
+  }
+  return normalizedPath;
+}
+
+function prependBasePath(path: string): string {
+  if (!APP_BASE_PATH) {
+    return path;
+  }
+  if (path === "/") {
+    return APP_BASE_PATH || "/";
+  }
+  return `${APP_BASE_PATH}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function encodePathSegment(value: string): string {
+  return encodeURIComponent(value);
+}
+
+function decodePathSegment(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 export default App;

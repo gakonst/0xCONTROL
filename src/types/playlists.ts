@@ -10,4 +10,7 @@ export type Playlist = {
   accentTo?: string;
   cover?: string;
   trackIds: string[];
+  folderPath?: string[];
+  isPinned?: boolean;
+  isFavorite?: boolean;
 };

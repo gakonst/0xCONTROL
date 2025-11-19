@@ -37,6 +37,8 @@ type TrackListHeaderConfig = {
   description?: string;
   onBack?: () => void;
   backLabel?: string;
+  backDestinationLabel?: string;
+  showFullBackRow?: boolean;
 };
 
 const formatTotalDuration = (tracks: Track[]) => {
@@ -90,11 +92,12 @@ export function TrackList({
   const sortDirection = isSortControlled
     ? controlledSortDirection
     : uncontrolledSortDirection;
-  const quickAddEnabled =
-    typeof onQuickAddToPlaylist === "function" && Boolean(quickAddLabel);
+  const quickAddEnabled = typeof onQuickAddToPlaylist === "function";
   const quickRemoveEnabled =
     typeof onQuickRemoveFromPlaylist === "function" &&
     Boolean(quickRemoveLabel);
+
+  const showFullBackRow = Boolean(header?.onBack && header?.showFullBackRow);
 
   const searchCriteria = useMemo(
     () => parseSearchQuery(searchQuery),
@@ -241,7 +244,7 @@ export function TrackList({
         }}
         onClearSearch={() => setSearchQuery("")}
         backAction={
-          header?.onBack
+          header?.onBack && !showFullBackRow
             ? {
                 onBack: header.onBack,
                 label: header.backLabel,
@@ -252,6 +255,31 @@ export function TrackList({
       />
 
       <div className="flex-1 overflow-auto pb-6">
+        {showFullBackRow && header?.onBack && (
+          <button
+            type="button"
+            onClick={header.onBack}
+            className={cn(
+              "group flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition md:px-5",
+              "min-h-[3.5rem] hover:bg-white/5/40",
+            )}
+          >
+            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center border border-white/10 bg-white/5 text-[0.85rem] text-white/70">
+              ←
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <p className="truncate text-[0.9rem] font-semibold text-foreground md:text-base">
+                {headingTitle}
+              </p>
+              <p className="text-[0.65rem] uppercase tracking-tight text-muted-foreground md:text-xs">
+                {header.backLabel ?? "Up one level"}
+              </p>
+            </div>
+            <div className="text-[0.7rem] text-muted-foreground md:text-xs">
+              {header.backDestinationLabel ?? "All playlists"}
+            </div>
+          </button>
+        )}
         {sortedTracks.map((track) => (
           <TrackListRow
             key={track.id}
@@ -297,7 +325,7 @@ function TrackListRow({
   const suppressClickRef = useRef(false);
   const actionThreshold = 72;
   const maxOffset = 160;
-  const canAdd = Boolean(onQuickAdd && quickAddLabel);
+  const canAdd = typeof onQuickAdd === "function";
   const canRemove = Boolean(onQuickRemove && quickRemoveLabel);
   const fallbackInitial =
     track.title.charAt(0).toUpperCase() ||

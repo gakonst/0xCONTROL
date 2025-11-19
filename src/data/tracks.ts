@@ -30,10 +30,37 @@ type CatalogResponse = {
 const DEFAULT_COVER = "";
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+const SHOULD_USE_LOCAL_TRACKS =
+  (import.meta.env.VITE_USE_LOCAL_TRACKS as string | undefined) === "true";
+const LOCAL_TRACK_MANIFEST_PATH =
+  (import.meta.env.VITE_LOCAL_TRACK_MANIFEST_PATH as string | undefined) ??
+  "/tracks/manifest.json";
+
+type LocalTrackManifestEntry = {
+  fileName?: string;
+  name: string;
+  version?: string;
+  artist: string;
+  durationSeconds?: number;
+  bpm?: number;
+  key?: string;
+};
 
 export async function fetchCatalogTracks(
   signal?: AbortSignal,
 ): Promise<Track[]> {
+  const records = SHOULD_USE_LOCAL_TRACKS
+    ? await loadLocalCatalogRecords(signal)
+    : await loadRemoteCatalogRecords(signal);
+
+  return records.map((record, index) =>
+    convertCatalogRecordToTrack(record, index),
+  );
+}
+
+async function loadRemoteCatalogRecords(
+  signal?: AbortSignal,
+): Promise<CatalogTrackRecord[]> {
   const catalogUrl = buildCatalogUrl();
   const response = await fetch(catalogUrl, { signal });
 
@@ -42,10 +69,26 @@ export async function fetchCatalogTracks(
   }
 
   const payload = (await response.json()) as CatalogResponse;
-  const records = payload.tracks ?? [];
+  return payload.tracks ?? [];
+}
 
-  return records.map((record, index) =>
-    convertCatalogRecordToTrack(record, index),
+async function loadLocalCatalogRecords(
+  signal?: AbortSignal,
+): Promise<CatalogTrackRecord[]> {
+  const response = await fetch(LOCAL_TRACK_MANIFEST_PATH, {
+    signal,
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Local catalog request failed with status ${response.status}`,
+    );
+  }
+
+  const manifest = (await response.json()) as LocalTrackManifestEntry[];
+  return manifest.map((entry, index) =>
+    convertLocalManifestEntryToCatalogRecord(entry, index),
   );
 }
 
@@ -64,6 +107,32 @@ function convertCatalogRecordToTrack(
     duration: formatDurationFromSeconds(record.durationSeconds),
     cover: DEFAULT_COVER,
     annotation: buildAnnotationFromRecord(record),
+  };
+}
+
+function convertLocalManifestEntryToCatalogRecord(
+  entry: LocalTrackManifestEntry,
+  index: number,
+): CatalogTrackRecord {
+  const normalizedFileName = entry.fileName?.trim();
+  const identifier =
+    normalizedFileName && normalizedFileName.length
+      ? normalizedFileName
+      : `local-track-${index}`;
+
+  const resolvedName =
+    entry.version && entry.version.length
+      ? `${entry.name} - ${entry.version}`
+      : entry.name;
+
+  return {
+    id: identifier,
+    path: identifier,
+    name: resolvedName,
+    artist: entry.artist,
+    durationSeconds: entry.durationSeconds ?? null,
+    bpm: entry.bpm ?? null,
+    key: entry.key ?? null,
   };
 }
 
@@ -101,6 +170,10 @@ function buildCatalogUrl(): string {
 
 export function getTrackUrl(trackId: string): string {
   const encodedId = encodeURIComponent(trackId);
+  if (SHOULD_USE_LOCAL_TRACKS) {
+    return `/tracks/${encodedId}`;
+  }
+
   return buildApiUrl(`/api/tracks/${encodedId}`);
 }
 

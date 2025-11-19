@@ -14,6 +14,7 @@ const PLAYLIST_BLUEPRINTS: MockPlaylistBlueprint[] = [
     updatedAt: "2025-11-12T04:00:00Z",
     accentFrom: "#ff3d81",
     accentTo: "#f9b16e",
+    folderPath: ["Ops", "Field Kits"],
   },
   {
     id: "sunrise-bloom",
@@ -25,6 +26,7 @@ const PLAYLIST_BLUEPRINTS: MockPlaylistBlueprint[] = [
     updatedAt: "2025-11-08T10:30:00Z",
     accentFrom: "#4facfe",
     accentTo: "#00f2fe",
+    folderPath: ["Mood Arcs"],
   },
   {
     id: "control-tests",
@@ -36,6 +38,7 @@ const PLAYLIST_BLUEPRINTS: MockPlaylistBlueprint[] = [
     updatedAt: "2025-11-05T18:15:00Z",
     accentFrom: "#a18cd1",
     accentTo: "#fbc2eb",
+    folderPath: ["Ops", "QA"]
   },
 ];
 
