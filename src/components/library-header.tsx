@@ -18,6 +18,7 @@ type LibraryHeaderProps = {
     onBack: () => void;
   };
   extraControls?: ReactNode;
+  showClearButton?: boolean;
 };
 
 export function LibraryHeader({
@@ -29,6 +30,7 @@ export function LibraryHeader({
   description,
   backAction,
   extraControls,
+  showClearButton = true,
 }: LibraryHeaderProps) {
   return (
     <header className="px-3.5 py-4 md:px-5">
@@ -70,7 +72,7 @@ export function LibraryHeader({
                 placeholder={search.placeholder}
                 className="w-full border border-white/20 bg-white/5 px-3 py-2 text-xs text-white placeholder:text-white/60 focus:outline-none focus:ring-1 focus:ring-white/40"
               />
-              {search.value && (
+              {search.value && showClearButton && (
                 <button
                   type="button"
                   onClick={
