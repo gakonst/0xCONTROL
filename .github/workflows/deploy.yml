@@ -39,17 +39,9 @@ jobs:
       - name: Build project
         run: bun run build
 
-      - name: Upload Worker Version
-        id: upload
+      - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: versions upload
-
-      - name: Deploy Worker Version to production
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: versions deploy ${{ steps.upload.outputs.version-id }}
+          command: deploy
