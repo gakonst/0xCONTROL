@@ -1,4 +1,4 @@
-import { type MouseEvent, type PointerEvent, useMemo, useRef } from "react";
+import { type PointerEvent, useRef } from "react";
 
 import {
   ChevronDown,
@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { Track } from "@/data/tracks";
+import { PlaybackWaveform } from "@/components/playback-waveform";
 
 type FullScreenPlayerProps = {
   track: Track;
@@ -48,36 +49,13 @@ export function FullScreenPlayer({
 
   const safeDuration =
     durationSeconds ?? parseDurationToSeconds(track.duration);
-  const progress =
-    safeDuration > 0 ? Math.min(elapsedSeconds / safeDuration, 1) : 0;
-
-  const formatTime = useMemo(
-    () => (value: number) => {
-      const clamped = Math.max(0, Math.floor(value));
-      const minutes = Math.floor(clamped / 60);
-      const seconds = clamped % 60;
-      return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-    },
-    [],
-  );
 
   const swipeStartRef = useRef<number | null>(null);
   const swipePointerRef = useRef<number | null>(null);
-  const progressBarRef = useRef<HTMLDivElement | null>(null);
 
   const resetSwipe = () => {
     swipeStartRef.current = null;
     swipePointerRef.current = null;
-  };
-
-  const handleSeekClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (!progressBarRef.current || safeDuration <= 0) return;
-    const rect = progressBarRef.current.getBoundingClientRect();
-    const ratio = Math.min(
-      Math.max((event.clientX - rect.left) / rect.width, 0),
-      1,
-    );
-    onSeek(ratio * safeDuration);
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -177,21 +155,14 @@ export function FullScreenPlayer({
           </p>
         </div>
 
-        <div className="w-full max-w-xl">
-          <div className="flex items-center justify-between text-xs text-white/70">
-            <span>{formatTime(elapsedSeconds)}</span>
-            <span>{formatTime(safeDuration)}</span>
-          </div>
-          <div
-            ref={progressBarRef}
-            className="mt-2 h-1.5 w-full cursor-pointer overflow-hidden rounded bg-white/20"
-            onClick={handleSeekClick}
-          >
-            <div
-              className="h-full bg-white"
-              style={{ width: `${progress * 100}%` }}
-            />
-          </div>
+        <div className="w-full max-w-3xl">
+          <PlaybackWaveform
+            trackId={track.id}
+            elapsedSeconds={elapsedSeconds}
+            durationSeconds={safeDuration}
+            isPlaying={isPlaying}
+            onSeek={onSeek}
+          />
         </div>
 
         <div className="mt-4 flex items-center justify-center gap-6">

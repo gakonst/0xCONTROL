@@ -9,6 +9,35 @@ export type Track = {
   duration: string;
   cover: string;
   annotation?: TrackAnnotation;
+  hasWaveform?: boolean;
+  analyzedBpm?: number | null;
+  analyzedKey?: string | null;
+};
+
+export type WaveformBucket = {
+  low: number;
+  mid: number;
+  high: number;
+};
+
+export type WaveformSeries = {
+  bucketDurationSeconds: number;
+  buckets: WaveformBucket[];
+};
+
+export type BeatGrid = {
+  startOffsetSeconds: number;
+  intervalSeconds: number;
+};
+
+export type TrackWaveformResponse = {
+  trackId: string;
+  durationSeconds: number;
+  overview: WaveformSeries;
+  detail: WaveformSeries;
+  bpm: number | null;
+  key: string | null;
+  beatGrid: BeatGrid | null;
 };
 
 type CatalogTrackRecord = {
@@ -21,6 +50,9 @@ type CatalogTrackRecord = {
   key?: string | null;
   annotationColor?: TrackColor | null;
   annotationNote?: string | null;
+  analyzedBpm?: number | null;
+  analyzedKey?: string | null;
+  hasWaveform?: boolean;
 };
 
 type CatalogResponse = {
@@ -64,6 +96,9 @@ function convertCatalogRecordToTrack(
     duration: formatDurationFromSeconds(record.durationSeconds),
     cover: DEFAULT_COVER,
     annotation: buildAnnotationFromRecord(record),
+    hasWaveform: record.hasWaveform ?? false,
+    analyzedBpm: record.analyzedBpm ?? undefined,
+    analyzedKey: record.analyzedKey ?? undefined,
   };
 }
 
@@ -102,6 +137,22 @@ function buildCatalogUrl(): string {
 export function getTrackUrl(trackId: string): string {
   const encodedId = encodeURIComponent(trackId);
   return buildApiUrl(`/api/tracks/${encodedId}`);
+}
+
+export async function fetchTrackWaveform(
+  trackId: string,
+  signal?: AbortSignal,
+): Promise<TrackWaveformResponse> {
+  const encodedId = encodeURIComponent(trackId);
+  const response = await fetch(buildApiUrl(`/api/tracks/${encodedId}/waveform`), {
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Waveform request failed with status ${response.status}`);
+  }
+
+  return (await response.json()) as TrackWaveformResponse;
 }
 
 export function buildApiUrl(path: string): string {

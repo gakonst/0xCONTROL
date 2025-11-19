@@ -7,6 +7,16 @@ CREATE TABLE IF NOT EXISTS track_metadata (
   musical_key TEXT NOT NULL,
   annotation_color TEXT,
   annotation_note TEXT,
+  waveform_overview TEXT,
+  waveform_detail TEXT,
+  waveform_overview_bucket_duration REAL,
+  waveform_detail_bucket_duration REAL,
+  waveform_sample_rate INTEGER,
+  analyzed_bpm REAL,
+  analyzed_key TEXT,
+  beat_grid TEXT,
+  waveform_version INTEGER DEFAULT 1,
+  analyzed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );

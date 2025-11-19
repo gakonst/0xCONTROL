@@ -5,6 +5,13 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { MiddlewareHandler } from "hono";
 
+import {
+  analyzeAudioBuffer,
+  type BeatGrid,
+  type TrackAnalysisResult,
+  type WaveformSeries,
+} from "./audio-analysis";
+
 type AnnotationColor = "red" | "blue" | "pink" | "cyan";
 
 interface TrackRecord {
@@ -209,6 +216,27 @@ const trackStreamHandler: MiddlewareHandler<WorkerContext> = async (c) => {
 
 app.get("/api/tracks/:trackId", requireAuth, trackStreamHandler);
 
+app.get("/api/tracks/:trackId/waveform", requireAuth, async (c) => {
+  const rawTrackId = c.req.param("trackId");
+  if (!rawTrackId) {
+    return c.text("Track identifier is required", 400);
+  }
+
+  const normalizedTrackId = safeDecodeURIComponent(rawTrackId) ?? rawTrackId;
+  const trackRow = await loadTrackMetadataRow(c.env.TRACKS_DB, normalizedTrackId);
+  if (!trackRow) {
+    return c.text("Track not found", 404);
+  }
+
+  try {
+    const waveformData = await ensureWaveformAnalysis(trackRow, rawTrackId, c.env);
+    return c.json(buildWaveformResponse(normalizedTrackId, waveformData, trackRow));
+  } catch (error) {
+    console.error("Failed to analyze waveform", error);
+    return c.text("Unable to analyze waveform", 500);
+  }
+});
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const honoResponse = await app.fetch(request, env, ctx);
@@ -262,6 +290,155 @@ function convertMetadataRowToTrack(row: TrackMetadataRow): TrackRecord {
     key: row.musical_key ?? undefined,
     annotationColor: row.annotation_color ?? null,
     annotationNote: row.annotation_note ?? null,
+  };
+}
+
+async function ensureWaveformAnalysis(
+  row: TrackMetadataRow,
+  rawTrackId: string,
+  env: Env,
+): Promise<StoredWaveformData> {
+  const existing = parseWaveformDataFromRow(row);
+  if (existing) {
+    return existing;
+  }
+
+  const object = await loadTrackObject(env, rawTrackId);
+  if (!object) {
+    throw new Error(`Track media not found for ${rawTrackId}`);
+  }
+
+  const arrayBuffer = await object.arrayBuffer();
+  const analysis = await analyzeAudioBuffer(arrayBuffer);
+  await persistWaveformAnalysis(row.track_id, analysis, env);
+
+  return {
+    overview: analysis.overview,
+    detail: analysis.detail,
+    bpm: analysis.bpm ?? null,
+    key: analysis.detectedKey ?? null,
+    beatGrid: analysis.beatGrid ?? null,
+    durationSeconds: analysis.durationSeconds,
+    sampleRate: analysis.sampleRate,
+  };
+}
+
+async function loadTrackObject(
+  env: Env,
+  rawTrackId: string,
+): Promise<R2ObjectBody | null> {
+  const candidates = buildTrackKeyCandidates(rawTrackId);
+  for (const candidate of candidates) {
+    const object = await env.TRACKS_BUCKET.get(candidate);
+    if (object) {
+      return object;
+    }
+  }
+  return null;
+}
+
+async function persistWaveformAnalysis(
+  trackId: string,
+  analysis: TrackAnalysisResult,
+  env: Env,
+): Promise<void> {
+  const beatGridJson = analysis.beatGrid ? JSON.stringify(analysis.beatGrid) : null;
+  await env.TRACKS_DB.prepare(
+    `
+      UPDATE track_metadata
+      SET waveform_overview = ?,
+          waveform_detail = ?,
+          waveform_overview_bucket_duration = ?,
+          waveform_detail_bucket_duration = ?,
+          waveform_sample_rate = ?,
+          analyzed_bpm = ?,
+          analyzed_key = ?,
+          beat_grid = ?,
+          analyzed_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE track_id = ?
+    `,
+  )
+    .bind(
+      JSON.stringify(analysis.overview),
+      JSON.stringify(analysis.detail),
+      analysis.overview.bucketDurationSeconds,
+      analysis.detail.bucketDurationSeconds,
+      analysis.sampleRate,
+      analysis.bpm ?? null,
+      analysis.detectedKey ?? null,
+      beatGridJson,
+      trackId,
+    )
+    .run();
+}
+
+function parseWaveformDataFromRow(row: TrackMetadataRow): StoredWaveformData | null {
+  const overview = parseWaveformSeries(row.waveform_overview);
+  const detail = parseWaveformSeries(row.waveform_detail);
+  if (!overview || !detail) {
+    return null;
+  }
+
+  return {
+    overview,
+    detail,
+    bpm: row.analyzed_bpm ?? row.bpm ?? null,
+    key: row.analyzed_key ?? row.musical_key ?? null,
+    beatGrid: parseBeatGrid(row.beat_grid),
+    durationSeconds:
+      row.duration_seconds ?? detail.bucketDurationSeconds * detail.buckets.length,
+    sampleRate: row.waveform_sample_rate ?? null,
+  };
+}
+
+function parseWaveformSeries(serialized?: string | null): WaveformSeries | null {
+  if (!serialized) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(serialized) as WaveformSeries;
+    if (!parsed || !Array.isArray(parsed.buckets)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function parseBeatGrid(serialized?: string | null): BeatGrid | null {
+  if (!serialized) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(serialized) as BeatGrid;
+    if (
+      typeof parsed?.startOffsetSeconds === "number" &&
+      typeof parsed?.intervalSeconds === "number"
+    ) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function buildWaveformResponse(
+  trackId: string,
+  waveform: StoredWaveformData,
+  row: TrackMetadataRow,
+) {
+  const durationSeconds = waveform.durationSeconds || row.duration_seconds || 0;
+  return {
+    trackId,
+    durationSeconds,
+    overview: waveform.overview,
+    detail: waveform.detail,
+    bpm: waveform.bpm ?? row.bpm ?? null,
+    key: waveform.key ?? row.musical_key ?? null,
+    beatGrid: waveform.beatGrid,
   };
 }
 
