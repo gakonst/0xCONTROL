@@ -122,6 +122,8 @@ export function PlayerBar({
               <Waveform
                 waveData={track.waveform}
                 currentTime={elapsedSeconds}
+                scrollWithCurrentTime
+                windowRatio={0.4}
                 className="h-full w-full"
               />
             ) : (

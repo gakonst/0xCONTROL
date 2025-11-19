@@ -123,6 +123,8 @@ export function FullScreenPlayer({
             waveData={track.waveform}
             currentTime={elapsedSeconds}
             variant="flat"
+            scrollWithCurrentTime
+            windowRatio={0.65}
             className="h-full w-full"
           />
         ) : (
@@ -158,6 +160,8 @@ export function FullScreenPlayer({
             <Waveform
               waveData={track.waveform}
               currentTime={elapsedSeconds}
+              scrollWithCurrentTime
+              windowRatio={0.35}
               className="h-full w-full"
             />
           ) : (

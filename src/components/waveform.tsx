@@ -10,6 +10,8 @@ type WaveformProps = {
   barMarkers?: number[];
   className?: string;
   variant?: "card" | "flat";
+  scrollWithCurrentTime?: boolean;
+  windowRatio?: number;
 };
 
 const BAND_COLORS: Record<keyof BandFrame, [number, number, number]> = {
@@ -35,6 +37,8 @@ export function Waveform({
   barMarkers,
   className,
   variant = "card",
+  scrollWithCurrentTime = false,
+  windowRatio,
 }: WaveformProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -86,6 +90,9 @@ export function Waveform({
         barMarkers,
         currentTime,
         duration,
+        scrollWithCurrentTime,
+        windowRatio,
+        variant,
       });
     } else {
       drawPlaceholder(ctx, width, height);
@@ -116,9 +123,22 @@ function drawBackground(
   variant: "card" | "flat",
 ) {
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle =
-    variant === "card" ? "rgba(0,0,0,0.95)" : "rgba(0,0,0,0.25)";
-  ctx.fillRect(0, 0, width, height);
+  if (variant === "card") {
+    ctx.fillStyle = "rgba(2,2,2,0.98)";
+    ctx.fillRect(0, 0, width, height);
+    const vignette = ctx.createLinearGradient(0, 0, 0, height);
+    vignette.addColorStop(0, "rgba(255,255,255,0.08)");
+    vignette.addColorStop(0.5, "rgba(255,255,255,0.02)");
+    vignette.addColorStop(1, "rgba(255,255,255,0.08)");
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, width, height);
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, width - 1, height - 1);
+  } else {
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.fillRect(0, 0, width, height);
+  }
 }
 
 type DrawWaveformOptions = {
@@ -130,6 +150,9 @@ type DrawWaveformOptions = {
   barMarkers?: number[];
   currentTime?: number;
   duration: number;
+  scrollWithCurrentTime?: boolean;
+  windowRatio?: number;
+  variant: "card" | "flat";
 };
 
 function drawWaveform({
@@ -141,21 +164,48 @@ function drawWaveform({
   barMarkers,
   currentTime,
   duration,
+  scrollWithCurrentTime,
+  windowRatio,
+  variant,
 }: DrawWaveformOptions) {
   const frames = waveData.frames;
   if (!frames.length) return;
 
   const centerY = height / 2;
   const maxAmplitude = height * 0.45;
-  const framesPerPixel = frames.length / width;
+  const progress =
+    typeof currentTime === "number" && duration > 0
+      ? clamp(currentTime / duration, 0, 1)
+      : 0;
+
+  const effectiveWindowRatio = scrollWithCurrentTime
+    ? clamp(
+        windowRatio ?? (variant === "card" ? 0.35 : 0.6),
+        0.1,
+        1,
+      )
+    : 1;
+  const { windowStart, windowSize } = computeWindowBounds(
+    progress,
+    effectiveWindowRatio,
+  );
+
+  const framesPerPixel = Math.max(
+    1,
+    (frames.length * windowSize) / Math.max(width, 1),
+  );
+  const initialFrame = windowStart * frames.length;
 
   ctx.lineCap = "round";
+  ctx.lineWidth = variant === "card" ? 1.4 : 1.1;
+  ctx.shadowColor = variant === "card" ? "rgba(0,0,0,0.35)" : "transparent";
+  ctx.shadowBlur = variant === "card" ? 6 : 0;
   let smoothed = 0;
   for (let x = 0; x < width; x++) {
-    const startIndex = Math.floor(x * framesPerPixel);
+    const startIndex = Math.floor(initialFrame + x * framesPerPixel);
     const endIndex = Math.min(
       frames.length,
-      Math.floor((x + 1) * framesPerPixel) || startIndex + 1,
+      Math.floor(initialFrame + (x + 1) * framesPerPixel),
     );
     const aggregated = aggregateFrames(frames, startIndex, endIndex);
     const { color, totalEnergy } = mixBandColors(aggregated);
@@ -176,7 +226,13 @@ function drawWaveform({
   }
 
   if (typeof currentTime === "number" && duration > 0) {
-    const playheadX = Math.min((currentTime / duration) * width, width);
+    const playheadX = getPlayheadX({
+      width,
+      progress,
+      windowStart,
+      windowSize,
+      scrollWithCurrentTime,
+    });
     ctx.strokeStyle = "rgba(255,255,255,0.85)";
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -184,6 +240,65 @@ function drawWaveform({
     ctx.lineTo(playheadX + 0.5, height);
     ctx.stroke();
   }
+}
+
+function computeWindowBounds(progress: number, windowRatio: number) {
+  if (windowRatio >= 0.999) {
+    return { windowStart: 0, windowSize: 1 };
+  }
+
+  let windowSize = clamp(windowRatio, 0.05, 1);
+  const halfWindow = windowSize / 2;
+  let windowStart = progress - halfWindow;
+  let windowEnd = progress + halfWindow;
+
+  if (windowStart < 0) {
+    windowEnd -= windowStart;
+    windowStart = 0;
+  }
+  if (windowEnd > 1) {
+    windowStart -= windowEnd - 1;
+    windowEnd = 1;
+    windowStart = Math.max(windowStart, 0);
+  }
+
+  windowSize = clamp(windowEnd - windowStart, 0.05, 1);
+  return { windowStart, windowSize };
+}
+
+function getPlayheadX({
+  width,
+  progress,
+  windowStart,
+  windowSize,
+  scrollWithCurrentTime,
+}: {
+  width: number;
+  progress: number;
+  windowStart: number;
+  windowSize: number;
+  scrollWithCurrentTime?: boolean;
+}) {
+  if (!scrollWithCurrentTime || windowSize >= 0.999) {
+    return Math.min(progress * width, width);
+  }
+
+  const focusRatio = 0.45;
+  const epsilon = 0.002;
+  const isAtStart = windowStart <= epsilon;
+  const isAtEnd = windowStart + windowSize >= 1 - epsilon;
+
+  if (isAtStart) {
+    const ratioWithinWindow = progress / windowSize;
+    return clamp(ratioWithinWindow, 0, 1) * width;
+  }
+
+  if (isAtEnd) {
+    const ratioWithinWindow = (progress - windowStart) / windowSize;
+    return clamp(ratioWithinWindow, 0, 1) * width;
+  }
+
+  return focusRatio * width;
 }
 
 function aggregateFrames(
@@ -238,6 +353,10 @@ function mixBandColors(frame: BandFrame) {
     color: `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${alpha.toFixed(2)})`,
     totalEnergy: Math.min(frame.bass + frame.melody + frame.voice + frame.hats, 1),
   };
+}
+
+function clamp(value: number, min = 0, max = 1) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function drawMarker(
