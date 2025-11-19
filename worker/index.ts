@@ -115,7 +115,7 @@ app.use(
   cors({
     origin: (origin) => origin ?? "*",
     allowMethods: ["GET", "OPTIONS", "PATCH", "POST", "DELETE"],
-    allowHeaders: ["Content-Type"],
+    allowHeaders: ["Content-Type", "Cache-Control"],
   }),
 );
 
