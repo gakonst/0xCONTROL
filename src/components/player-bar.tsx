@@ -55,10 +55,16 @@ export function PlayerBar({
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
-    const isPlayButton = Boolean(
+    const interactedWithPlayControl = Boolean(
       target?.closest("[data-player-play-control='play']"),
     );
-    ignoreOpenRef.current = isPlayButton;
+    ignoreOpenRef.current = interactedWithPlayControl;
+
+    if (interactedWithPlayControl) {
+      resetSwipe();
+      return;
+    }
+
     swipeStartRef.current = event.clientX;
     swipePointerRef.current = event.pointerId;
     event.currentTarget.setPointerCapture(event.pointerId);

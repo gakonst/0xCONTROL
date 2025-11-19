@@ -649,9 +649,9 @@ function App() {
     }
   }, [currentTrack, currentTrackId, isPlaying]);
 
-  const handleTogglePlay = () => {
+  const handleTogglePlay = useCallback(() => {
     setIsPlaying((prev) => !prev);
-  };
+  }, []);
 
   const handlePlayRequest = useCallback(() => {
     setIsPlaying(true);
@@ -945,6 +945,42 @@ function App() {
     onSeekForward: handleSeekForward,
     onSeekTo: handleSeekToPosition,
   });
+
+  useEffect(() => {
+    const handleSpaceToggle = (event: KeyboardEvent) => {
+      if (event.repeat) return;
+
+      const isSpace =
+        event.code === "Space" ||
+        event.key === " " ||
+        event.key?.toLowerCase() === "spacebar";
+      if (!isSpace) {
+        return;
+      }
+
+      if (event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest(
+          "input, textarea, select, button, a, [contenteditable='true'], [role='textbox']",
+        )
+      ) {
+        return;
+      }
+
+      if (!currentTrack && !currentTrackId) {
+        return;
+      }
+
+      event.preventDefault();
+      handleTogglePlay();
+    };
+
+    window.addEventListener("keydown", handleSpaceToggle);
+    return () => {
+      window.removeEventListener("keydown", handleSpaceToggle);
+    };
+  }, [currentTrack, currentTrackId, handleTogglePlay]);
 
   useEffect(() => {
     return () => {
