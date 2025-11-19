@@ -173,16 +173,7 @@ export function PlaylistBrowser({
     onSortReset();
   };
 
-  if (!playlists.length) {
-    return (
-      <section className="flex h-full flex-col items-center justify-center gap-2 border border-dashed border-white/10 bg-black/30 text-center text-sm text-muted-foreground">
-        <p>No playlists yet.</p>
-        <p className="text-xs text-white/60">
-          Use the Create tab below to start drafting one.
-        </p>
-      </section>
-    );
-  }
+  const isEmpty = playlists.length === 0;
 
   const contentPlaylists = folderNavEnabled ? visiblePlaylists : sortedPlaylists;
 
@@ -345,6 +336,17 @@ export function PlaylistBrowser({
         extraControls={extraControls}
       />
       <div className="flex-1 overflow-auto pb-6">
+        {isEmpty && (
+          <div className="flex h-full flex-col items-center justify-center gap-2 border border-dashed border-white/10 bg-black/30 text-center text-sm text-muted-foreground">
+            <p>No playlists yet.</p>
+            <p className="text-xs text-white/60">
+              Use the Create tab below to start drafting one.
+            </p>
+          </div>
+        )}
+
+        {!isEmpty && (
+          <>
         {folderNavEnabled && activeFolderPath.length > 0 && (
           <button
             type="button"
@@ -408,7 +410,7 @@ export function PlaylistBrowser({
             </button>
           ))}
 
-        {unpinnedPlaylists.map(renderPlaylistRow)}
+       {unpinnedPlaylists.map(renderPlaylistRow)}
 
         {!unpinnedPlaylists.length &&
           folderNavEnabled &&
@@ -417,6 +419,8 @@ export function PlaylistBrowser({
               Empty folder.
             </div>
           )}
+        </>
+        )}
       </div>
     </section>
   );

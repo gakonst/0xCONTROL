@@ -31,6 +31,14 @@ type PlaylistMetaUpdates = {
   isFavorite?: boolean;
 };
 
+type CreatePlaylistInput = {
+  title: string;
+  description?: string;
+  mood?: string;
+  tags?: string[];
+  folderPath?: string[];
+};
+
 export async function fetchPlaylists(
   signal?: AbortSignal,
 ): Promise<Playlist[]> {
@@ -48,6 +56,27 @@ export async function fetchPlaylists(
 
   const payload = (await response.json()) as PlaylistsResponse;
   return (payload.playlists ?? []).map(normalizePlaylist);
+}
+
+export async function createPlaylist(
+  input: CreatePlaylistInput,
+): Promise<Playlist> {
+  const response = await fetch(buildApiUrl("/api/playlists"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to create playlist (status ${response.status})`,
+    );
+  }
+
+  const payload = (await response.json()) as PlaylistResponse;
+  return normalizePlaylist(payload.playlist);
 }
 
 export async function updatePlaylistMeta(

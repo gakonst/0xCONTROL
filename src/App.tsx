@@ -27,6 +27,7 @@ import { LibraryTabs, type LibraryTabKey } from "@/components/library-tabs";
 import { updateTrackAnnotation } from "@/data/annotations";
 import {
   addTrackToPlaylist as addTrackToPlaylistApi,
+  createPlaylist,
   fetchPlaylists,
   removeTrackFromPlaylist as removeTrackFromPlaylistApi,
   updatePlaylistMeta,
@@ -147,6 +148,19 @@ function App() {
       return next;
     });
   }, []);
+
+  const handlePlaylistCreated = useCallback(
+    (playlist: Playlist) => {
+      setPlaylists((previous) => [playlist, ...previous]);
+      setPreferredPlaylistId(playlist.id);
+      setLibraryView({
+        type: "playlistDetail",
+        playlistId: playlist.id,
+        folderPath: playlist.folderPath ?? [],
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     if (Array.isArray(fetchedPlaylists)) {
@@ -957,7 +971,7 @@ function App() {
               onToggleFavorite={togglePlaylistFavorite}
             />
           ) : libraryView.type === "create" ? (
-            <PlaylistCreatePanel />
+            <PlaylistCreatePanel onPlaylistCreated={handlePlaylistCreated} />
           ) : (
             <TrackList
               className="h-full w-full"

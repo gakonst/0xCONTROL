@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { LibraryHeader } from "@/components/library-header";
+import { createPlaylist } from "@/data/playlists";
+import type { Playlist } from "@/types/playlists";
 
 const URL_PATTERN = /^https?:\/\//i;
 const SOUNDCLOUD_PATTERN = /soundcloud\.com/i;
@@ -16,10 +18,16 @@ type EmbedMetadata = {
   originalUrl: string;
 };
 
-export function PlaylistCreatePanel() {
+type PlaylistCreatePanelProps = {
+  onPlaylistCreated?: (playlist: Playlist) => void;
+};
+
+export function PlaylistCreatePanel({ onPlaylistCreated }: PlaylistCreatePanelProps) {
   const [entry, setEntry] = useState("");
   const [metadata, setMetadata] = useState<EmbedMetadata | null>(null);
   const [metadataState, setMetadataState] = useState<MetadataState>("idle");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const trimmedValue = entry.trim();
   const isUrl = URL_PATTERN.test(trimmedValue);
@@ -98,6 +106,44 @@ export function PlaylistCreatePanel() {
         ? "border-white/80 text-white"
         : "border-emerald-200 text-emerald-100";
 
+  useEffect(() => {
+    if (errorMessage) {
+      setErrorMessage(null);
+    }
+  }, [entry]);
+
+  const handleCreatePlaylist = async () => {
+    if (mode !== "playlist" || !trimmedValue) {
+      return;
+    }
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const playlist = await createPlaylist({ title: trimmedValue });
+      onPlaylistCreated?.(playlist);
+      setEntry("");
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to create playlist. Please try again.";
+      setErrorMessage(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePrimaryAction = () => {
+    if (mode === "playlist") {
+      void handleCreatePlaylist();
+      return;
+    }
+    // TODO: implement download flow
+  };
+
+  const isPrimaryDisabled =
+    mode === "idle" || (mode === "playlist" && (isSubmitting || !trimmedValue.length));
+
   return (
     <section className="flex h-full flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_rgba(3,7,18,0.95))] shadow-[0_25px_120px_rgba(3,7,18,0.85)] backdrop-blur">
       <LibraryHeader
@@ -140,11 +186,19 @@ export function PlaylistCreatePanel() {
         <div className="mt-4 flex flex-col gap-2 md:flex-row md:justify-end">
           <button
             type="button"
-            disabled={mode === "idle"}
-            className={`border px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.15rem] ${primaryButtonStateClasses}`}
+            disabled={isPrimaryDisabled}
+            onClick={handlePrimaryAction}
+            className={`border px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.15rem] ${primaryButtonStateClasses} ${isPrimaryDisabled ? "opacity-60 cursor-not-allowed" : ""}`}
           >
-            {mode === "download" ? "Download" : "Create"}
+            {mode === "download"
+              ? "Download"
+              : isSubmitting
+                ? "Creating..."
+                : "Create"}
           </button>
+          {errorMessage && (
+            <p className="text-xs text-rose-200">{errorMessage}</p>
+          )}
         </div>
       </div>
     </section>
