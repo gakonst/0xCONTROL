@@ -63,7 +63,7 @@ export function WaveformPreview() {
           buildRemoteSource(
             url,
             first?.name ?? "Sample Track",
-            `/tracks/waveforms/${encodeURIComponent(fileName)}.json`,
+            buildWaveformUrlFromFileName(fileName),
           ),
         );
       } catch (error) {
@@ -73,7 +73,9 @@ export function WaveformPreview() {
           buildRemoteSource(
             FALLBACK_SAMPLE,
             "Sample Track",
-            "/tracks/waveforms/Anyma,%20Argy,%20Son%20of%20Son%20-%20Voices%20In%20My%20Head.mp3.json",
+            buildWaveformUrlFromFileName(
+              "Anyma, Argy, Son of Son - Voices In My Head.mp3",
+            ),
           ),
         );
         console.warn("manifest load failed", error);
@@ -93,6 +95,7 @@ export function WaveformPreview() {
         label: file.name,
         url: objectUrl,
         originalName: file.name,
+        waveformUrl: buildWaveformUrlFromFileName(file.name),
         fetchArrayBuffer: () => file.arrayBuffer(),
       };
       await loadSource(source, true);
@@ -178,11 +181,11 @@ export function WaveformPreview() {
                 accept="audio/*"
                 className="hidden"
                 onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) handleFileChosen(file);
-                }}
-              />
-            </label>
+          const file = event.target.files?.[0];
+          if (file) handleFileChosen(file);
+        }}
+      />
+      </label>
 
             <button
               type="button"
@@ -466,11 +469,22 @@ function buildRemoteSource(url: string, label: string, waveformUrl?: string): Tr
   };
 }
 
+function buildWaveformUrlFromFileName(fileName?: string | null) {
+  if (!fileName) return undefined;
+  return `/tracks/waveforms/${encodeURIComponent(fileName)}.json`;
+}
+
 async function loadPrecomputedWaveform(url?: string | null) {
   if (!url) return null;
   try {
     const response = await fetch(url, { cache: "no-store" });
     if (!response.ok) return null;
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.toLowerCase().includes("application/json")) {
+      return null;
+    }
+
     const data = (await response.json()) as WaveformData;
     return data;
   } catch (error) {

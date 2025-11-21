@@ -10,6 +10,15 @@ While playing, we want a white vertical line that highlights where we are in the
 
 We will iterate on it locally first, by generating a preview page which shows the waveform against a track. Then once we are happy with our preview (I'll tell you when I'm happy with it) we will integrate it into our app. It's OK to use ffmpeg for audio decoding.
 
+Current local setup (done):
+- `scripts/preprocess-waveform.ts` decodes audio with ffmpeg → mono 44.1k PCM → runs the Rekordbox-style analyzer → emits both JSON (`<slug>.json`) and a standalone preview HTML (`<slug>.preview.html` + `preview.html`) into `tracks/waveforms/`.
+- The preview HTML loads the matching audio via a relative path, renders RGB bars, draws per-second tick marks (brighter every 10s), and an animated playhead that is white while playing and red while paused. Clicking the waveform seeks.
+- Because duration is embedded alongside the bars, the grid/playhead stay perfectly aligned with “Now playing”.
+
+Workflow:
+1) `bun scripts/preprocess-waveform.ts "tracks/<file>.mp3"` (optional second arg = output dir).
+2) Open the generated `tracks/waveforms/preview.html` (or the per-track `.preview.html`) in a browser to review fidelity, colors, and alignment.
+
 # Step 2
 
 Then we will want to do BPM analysis. After that, we will add a beat grid with a thin white low opacity vertical line on every beat, and white arrows pointing inwards to the line so it's like below:
