@@ -29,8 +29,8 @@ const DEFAULT_FFT_SIZE = 2048;
 // melody/treble up to ~9 kHz, with “air” above that reserved for white.
 const BANDS = {
   bass: { min: 20, max: 220 },
-  voice: { min: 220, max: 2000 },
-  melody: { min: 2000, max: 9000 },
+  voice: { min: 250, max: 2200 },
+  melody: { min: 2200, max: 9000 },
   air: { min: 9000, max: 18000 },
 } as const;
 
@@ -80,7 +80,7 @@ export async function analyzeWaveformFromBuffer(
     bandsPerBar.push(energies);
   }
 
-  const maxima = bandsPerBar.reduce(
+const maxima = bandsPerBar.reduce(
     (acc, band) => {
       acc.total = Math.max(acc.total, band.total);
       acc.bass = Math.max(acc.bass, band.bass);
@@ -92,23 +92,26 @@ export async function analyzeWaveformFromBuffer(
     { total: 0, bass: 0, voice: 0, melody: 0, air: 0 },
   );
 
-  const bars: WaveformBar[] = bandsPerBar.map((band) => {
+const bars: WaveformBar[] = bandsPerBar.map((band) => {
     const amplitude = normalize(band.total, maxima.total, 0.7);
     const bass = normalize(band.bass, maxima.bass, 0.6);
-    const voice = normalize(band.voice, maxima.voice, 0.6);
-    const melody = normalize(band.melody, maxima.melody, 0.55); // lift highs/blue
-    const air = normalize(band.air, maxima.air, 0.8);
 
-    // Cap whiteness so it doesn’t wash out red; only a thin sheen.
-    const whiteness = clamp(Math.pow(air, 1.0) * 0.35, 0, 0.35);
+    // Tilt melody up relative to voice for clearer blue, but still keep vocals present.
+    const voiceWeight = 1.0;
+    const melodyWeight = 1.35;
+    const voice = normalize(band.voice * voiceWeight, maxima.voice * voiceWeight, 0.62);
+    const melody = normalize(band.melody * melodyWeight, maxima.melody * melodyWeight, 0.5);
+    const air = normalize(band.air, maxima.air, 0.9);
+
+    // Cap whiteness to avoid washing colors.
+    const whiteness = clamp(Math.pow(air, 1.1) * 0.25, 0, 0.25);
 
     return {
       amplitude,
       color: {
-        // Slight boosts to red/green/blue to restore vividness after whitening.
-        r: clamp(bass * 1.2 * (1 - whiteness) + whiteness),
-        g: clamp(voice * 1.05 * (1 - whiteness) + whiteness),
-        b: clamp(melody * 1.25 * (1 - whiteness) + whiteness),
+        r: clamp(bass * 1.18 * (1 - whiteness) + whiteness * 0.8),
+        g: clamp(voice * 1.08 * (1 - whiteness) + whiteness * 0.9),
+        b: clamp(melody * 1.45 * (1 - whiteness) + whiteness),
       },
       whiteness,
     };
