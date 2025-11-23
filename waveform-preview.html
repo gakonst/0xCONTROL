@@ -205,7 +205,10 @@
         if (audioEl.duration) {
           audioEl.currentTime = ratio * audioEl.duration;
         }
-        drawOverlay();
+        if (audioEl.paused) {
+          drawOverlay();
+          updateTime();
+        }
       });
 
       playBtn.onclick = () => {
@@ -225,6 +228,18 @@
         drawOverlay();
       };
       audioEl.ontimeupdate = updateTime;
+
+      // Spacebar toggles play/pause
+      window.addEventListener("keydown", (e) => {
+        if (e.code === "Space") {
+          e.preventDefault();
+          if (audioEl.paused) {
+            audioEl.play().catch(() => {});
+          } else {
+            audioEl.pause();
+          }
+        }
+      });
 
       function updateTime() {
         const cur = audioEl.currentTime || 0;

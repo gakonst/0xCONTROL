@@ -25,11 +25,13 @@ export type WaveformAnalysisOptions = {
 const DEFAULT_RESOLUTION = 1800;
 const DEFAULT_FFT_SIZE = 2048;
 
+// Tuned toward Rekordbox-style coloring: lows up to ~220 Hz, mids to ~2 kHz,
+// melody/treble up to ~9 kHz, with “air” above that reserved for white.
 const BANDS = {
-  bass: { min: 20, max: 180 },
-  voice: { min: 180, max: 1400 },
-  melody: { min: 1400, max: 5200 },
-  air: { min: 5200, max: 18000 },
+  bass: { min: 20, max: 220 },
+  voice: { min: 220, max: 2000 },
+  melody: { min: 2000, max: 9000 },
+  air: { min: 9000, max: 18000 },
 } as const;
 
 type BandKey = keyof typeof BANDS;
@@ -92,22 +94,21 @@ export async function analyzeWaveformFromBuffer(
 
   const bars: WaveformBar[] = bandsPerBar.map((band) => {
     const amplitude = normalize(band.total, maxima.total, 0.7);
-    const bass = normalize(band.bass, maxima.bass, 0.65);
-    const voice = normalize(band.voice, maxima.voice, 0.65);
-    const melody = normalize(band.melody, maxima.melody, 0.65);
-    const air = normalize(band.air, maxima.air, 0.6);
+    const bass = normalize(band.bass, maxima.bass, 0.6);
+    const voice = normalize(band.voice, maxima.voice, 0.6);
+    const melody = normalize(band.melody, maxima.melody, 0.55); // lift highs/blue
+    const air = normalize(band.air, maxima.air, 0.8);
 
-    const whiteness = clamp(Math.pow(air, 0.85), 0, 1);
-
-    // Blend base RGB toward white depending on how much “air” content exists.
-    const blend = (channel: number) => channel * (1 - whiteness) + whiteness;
+    // Cap whiteness so it doesn’t wash out red; only a thin sheen.
+    const whiteness = clamp(Math.pow(air, 1.0) * 0.35, 0, 0.35);
 
     return {
       amplitude,
       color: {
-        r: clamp(blend(bass * 1.05)),
-        g: clamp(blend(voice)),
-        b: clamp(blend(melody * 1.1)),
+        // Slight boosts to red/green/blue to restore vividness after whitening.
+        r: clamp(bass * 1.2 * (1 - whiteness) + whiteness),
+        g: clamp(voice * 1.05 * (1 - whiteness) + whiteness),
+        b: clamp(melody * 1.25 * (1 - whiteness) + whiteness),
       },
       whiteness,
     };
