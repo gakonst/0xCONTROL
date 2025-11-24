@@ -1,5 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 
+import { Container, getContainer, type ContainerNamespace } from "@cloudflare/containers";
 import type { D1Database } from "@cloudflare/workers-types";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -101,11 +102,23 @@ type PlaylistCreatePayload = {
   isFavorite?: boolean;
 };
 
+type AnalyzeRequestPayload = {
+  trackId?: string;
+  path?: string;
+  resolution?: number;
+};
+
+export class AnalyzerContainer extends Container {
+  defaultPort = 3000;
+  sleepAfter = "10m";
+}
+
 export interface Env {
   ASSETS: Fetcher;
   SONG_PASSWORD: string;
   TRACKS_BUCKET: R2Bucket;
   TRACKS_DB: D1Database;
+  ANALYZER_CONTAINER: ContainerNamespace;
 }
 
 const INDEX_PATH = "index.html";
@@ -149,6 +162,64 @@ app.get("/api/catalog", requireAuth, async (c) => {
   return c.json(catalog, 200, {
     "Cache-Control": "no-store",
   });
+});
+
+app.post("/api/analyze", requireAuth, async (c) => {
+  let payload: AnalyzeRequestPayload | null = null;
+  try {
+    payload = (await c.req.json()) as AnalyzeRequestPayload;
+  } catch {
+    return c.text("Invalid JSON payload", 400);
+  }
+
+  const rawTrackId = typeof payload?.path === "string" ? payload.path : payload?.trackId;
+  const candidateKeys = buildTrackKeyCandidates(rawTrackId);
+  if (candidateKeys.length === 0) {
+    return c.text("trackId or path is required", 400);
+  }
+
+  let object: R2ObjectBody | null = null;
+  for (const candidateKey of candidateKeys) {
+    object = await c.env.TRACKS_BUCKET.get(candidateKey);
+    if (object) break;
+  }
+
+  if (!object) {
+    return c.text("Track not found", 404);
+  }
+
+  try {
+    const analyzer = getContainer(c.env.ANALYZER_CONTAINER, "waveform");
+    await analyzer.startAndWaitForPorts();
+
+    const analyzeUrl = new URL("http://container/analyze");
+    if (typeof payload?.resolution === "number" && Number.isInteger(payload.resolution)) {
+      analyzeUrl.searchParams.set("resolution", String(payload.resolution));
+    }
+
+    const analyzeResponse = await analyzer.fetch(
+      new Request(analyzeUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            object.httpMetadata?.contentType ?? inferContentTypeFromKey(object.key),
+        },
+        body: await object.arrayBuffer(),
+      }),
+    );
+
+    if (!analyzeResponse.ok) {
+      const text = await analyzeResponse.text();
+      console.error("Analyzer container failed", text);
+      return c.text("Analyzer failed", 502);
+    }
+
+    const body = await analyzeResponse.json<Record<string, unknown>>();
+    return c.json(body, 200, { "Cache-Control": "no-store" });
+  } catch (error) {
+    console.error("Failed to analyze track", error);
+    return c.text("Analysis failed", 500);
+  }
 });
 
 app.get("/api/playlists", requireAuth, async (c) => {
