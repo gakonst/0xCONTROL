@@ -5,6 +5,7 @@ import type { D1Database } from "@cloudflare/workers-types";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { MiddlewareHandler } from "hono";
+import type { PresetKey } from "../src/lib/waveform";
 
 type AnnotationColor = "red" | "blue" | "pink" | "cyan";
 
@@ -106,6 +107,7 @@ type AnalyzeRequestPayload = {
   trackId?: string;
   path?: string;
   resolution?: number;
+  preset?: PresetKey;
 };
 
 export class AnalyzerContainer extends Container {
@@ -195,6 +197,10 @@ app.post("/api/analyze", requireAuth, async (c) => {
     const analyzeUrl = new URL("http://container/analyze");
     if (typeof payload?.resolution === "number" && Number.isInteger(payload.resolution)) {
       analyzeUrl.searchParams.set("resolution", String(payload.resolution));
+    }
+    const presetKey = payload?.preset;
+    if (presetKey) {
+      analyzeUrl.searchParams.set("preset", presetKey);
     }
 
     const analyzeResponse = await analyzer.fetch(
@@ -575,11 +581,14 @@ app.get("/api/tracks/:trackId", requireAuth, trackStreamHandler);
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const honoResponse = await app.fetch(request, env, ctx);
-    if (honoResponse.status !== 404) {
+    // Only fall back to static assets for GET/HEAD that truly 404 from the API router.
+    if (honoResponse.status !== 404 || (request.method !== "GET" && request.method !== "HEAD")) {
       return honoResponse;
     }
 
-    return serveAssets(request, env);
+    // Rebuild the request without a consumed body to satisfy asset handler.
+    const assetRequest = new Request(request.url, request);
+    return serveAssets(assetRequest, env);
   },
 } satisfies ExportedHandler<Env>;
 
@@ -802,6 +811,8 @@ function buildTrackKeyCandidates(rawTrackId?: string): string[] {
   }
 
   const decoded = safeDecodeURIComponent(rawTrackId);
+  const encoded = encodeURIComponent(decoded ?? rawTrackId);
+  const encodedUri = encodeURI(decoded ?? rawTrackId);
   const keys = new Set<string>();
 
   if (decoded) {
@@ -810,6 +821,17 @@ function buildTrackKeyCandidates(rawTrackId?: string): string[] {
 
   if (!decoded || decoded !== rawTrackId) {
     keys.add(rawTrackId);
+  }
+
+  keys.add(encoded);
+  keys.add(encodedUri);
+
+  // Common layout: objects live under a "tracks/" prefix in R2. Try both forms.
+  const candidates = Array.from(keys);
+  for (const key of candidates) {
+    if (!key.startsWith("tracks/")) {
+      keys.add(`tracks/${key}`);
+    }
   }
 
   return Array.from(keys);

@@ -137,11 +137,24 @@ WEB_LOG="$ROOT_DIR/.vite-dev.log"
 R2_PID=""
 WRANGLER_PID=""
 WEB_PID=""
+TMUX_LOG_SESSION=""
+declare -a TMUX_LOG_PANES=()
 
 cleanup() {
   [[ -n "${WEB_PID:-}" ]] && kill "$WEB_PID" 2>/dev/null || true
   [[ -n "${WRANGLER_PID:-}" ]] && kill "$WRANGLER_PID" 2>/dev/null || true
   [[ -n "${R2_PID:-}" ]] && kill "$R2_PID" 2>/dev/null || true
+
+  # Tear down any tmux panes/session we spawned for logs.
+  if [[ -n "${TMUX_LOG_SESSION:-}" ]]; then
+    tmux kill-session -t "$TMUX_LOG_SESSION" >/dev/null 2>&1 || true
+  fi
+
+  if [[ ${#TMUX_LOG_PANES[@]} -gt 0 ]]; then
+    for pane in "${TMUX_LOG_PANES[@]}"; do
+      tmux kill-pane -t "$pane" >/dev/null 2>&1 || true
+    done
+  fi
 }
 trap cleanup EXIT INT TERM
 
@@ -163,12 +176,27 @@ launch_tmux_logs() {
   local base_cmd="tail -n 50 -F"
 
   if [[ -n "${TMUX:-}" ]]; then
-    # Inside tmux: replace existing window if present
-    tmux kill-window -t "$target_window" >/dev/null 2>&1 || true
-    tmux new-window -n "$target_window" "${base_cmd} '$R2_LOG'"
-    tmux split-window -h "${base_cmd} '$WRANGLER_LOG'"
-    tmux split-window -v "${base_cmd} '$WEB_LOG'"
+    # Inside tmux: split the current window instead of creating a new one
+    local current_pane
+    current_pane="$(tmux display-message -p '#{pane_id}')"
+
+    local created=()
+
+    # R2 log on the right
+    created+=("$(tmux split-window -h -P -F '#{pane_id}' "${base_cmd} '$R2_LOG'")")
+
+    # Keep splitting the original pane so the logs stay together
+    tmux select-pane -t "$current_pane"
+    created+=("$(tmux split-window -v -P -F '#{pane_id}' "${base_cmd} '$WRANGLER_LOG'")")
+
+    tmux select-pane -t "$current_pane"
+    created+=("$(tmux split-window -v -P -F '#{pane_id}' "${base_cmd} '$WEB_LOG'")")
+
     tmux select-layout tiled >/dev/null
+    tmux select-pane -t "$current_pane"
+
+    TMUX_LOG_PANES=("${created[@]}")
+    TMUX_LOG_SESSION=""
   else
     # Detached session so users can attach manually
     tmux kill-session -t "$target_window" >/dev/null 2>&1 || true
@@ -177,6 +205,9 @@ launch_tmux_logs() {
     tmux split-window -v -t "$target_window" "${base_cmd} '$WEB_LOG'"
     tmux select-layout -t "$target_window" tiled >/dev/null
     echo "Logs available in tmux session '$target_window' (run: tmux attach -t $target_window)"
+
+    TMUX_LOG_SESSION="$target_window"
+    TMUX_LOG_PANES=()
   fi
 }
 

@@ -12,7 +12,13 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
-import { analyzeWaveformFromBuffer } from "../src/lib/waveform";
+import {
+  analyzeWaveformFromBuffer,
+  applyPresetToWaveform,
+  PRESETS,
+  type PresetConfig,
+  type PresetKey,
+} from "../src/lib/waveform";
 
 const DEFAULT_OUTPUT_DIR = "tracks/waveforms";
 const DEFAULT_SAMPLE_RATE = 44100;
@@ -24,108 +30,6 @@ type PseudoAudioBuffer = {
   sampleRate: number;
   duration: number;
   getChannelData: (channel: number) => Float32Array;
-};
-
-type PresetKey =
-  | "reference-clean"
-  | "vivid-studio"
-  | "crisp-micro"
-  | "balanced-film"
-  | "darkroom-contrast"
-  | "soft-pastel"
-  | "chrome-accurate"
-  | "gridliner"
-  | "smoothed-hifi"
-  | "airy-highlight";
-
-type PresetConfig = {
-  resolution: number;
-  fftSize: number;
-  amplitudeGamma: number;
-  saturationBoost: number; // e.g. 0.12 = +12%
-  brightnessBoost: number; // 0.1 = +10%
-  alphaCap?: number;
-  highsCap?: number;
-  smoothingWindow?: number;
-};
-
-const PRESETS: Record<PresetKey, PresetConfig> = {
-  "reference-clean": {
-    resolution: 5000,
-    fftSize: 4096,
-    amplitudeGamma: 0.9,
-    saturationBoost: 10.00,
-    brightnessBoost: 0.05,
-  },
-  "vivid-studio": {
-    resolution: 2000,
-    fftSize: 4096,
-    amplitudeGamma: 1,
-    saturationBoost: 0.12,
-    brightnessBoost: 0.05,
-    highsCap: 0.25,
-  },
-  "crisp-micro": {
-    resolution: 3200,
-    fftSize: 2048,
-    amplitudeGamma: 1,
-    saturationBoost: 0,
-    brightnessBoost: 0,
-    alphaCap: 0.7,
-  },
-  "balanced-film": {
-    resolution: 1800,
-    fftSize: 4096,
-    amplitudeGamma: 1,
-    saturationBoost: -0.08,
-    brightnessBoost: 0.1,
-  },
-  "darkroom-contrast": {
-    resolution: 2400,
-    fftSize: 4096,
-    amplitudeGamma: 1,
-    saturationBoost: -0.12,
-    brightnessBoost: -0.05,
-    highsCap: 0.2,
-  },
-  "soft-pastel": {
-    resolution: 2000,
-    fftSize: 2048,
-    amplitudeGamma: 1.1,
-    saturationBoost: -0.25,
-    brightnessBoost: 0.2,
-  },
-  "chrome-accurate": {
-    resolution: 2200,
-    fftSize: 4096,
-    amplitudeGamma: 1,
-    saturationBoost: 0.05,
-    brightnessBoost: 0.05,
-    highsCap: 0.25,
-  },
-  "gridliner": {
-    resolution: 2600,
-    fftSize: 2048,
-    amplitudeGamma: 0.95,
-    saturationBoost: 0,
-    brightnessBoost: 0,
-  },
-  "smoothed-hifi": {
-    resolution: 2200,
-    fftSize: 2048,
-    amplitudeGamma: 1,
-    saturationBoost: 0,
-    brightnessBoost: 0,
-    smoothingWindow: 5,
-  },
-  "airy-highlight": {
-    resolution: 2100,
-    fftSize: 4096,
-    amplitudeGamma: 1,
-    saturationBoost: 0,
-    brightnessBoost: 0.05,
-    highsCap: 0.2,
-  },
 };
 
 async function main() {
@@ -263,59 +167,6 @@ async function decodeToPCM(inputPath: string): Promise<{
   return { samples: mono, sampleRate: 44100 };
 }
 
-function applyPresetToWaveform(
-  waveform: { bars: any[]; sampleRate: number },
-  preset: PresetConfig,
-) {
-  const gamma = preset.amplitudeGamma ?? 1;
-  const bars = waveform.bars.map((bar) => {
-    const amp = Math.pow(bar.amplitude, gamma);
-    let { r, g, b } = bar.color;
-    let whiteness = bar.whiteness ?? 0;
-
-    if (preset.highsCap !== undefined) {
-      whiteness = Math.min(whiteness, preset.highsCap);
-    }
-
-    if (preset.saturationBoost !== 0 || preset.brightnessBoost !== 0) {
-      const { h, s, l } = rgbToHsl(r, g, b);
-      const s2 = clamp01(s * (1 + preset.saturationBoost));
-      const l2 = clamp01(l * (1 + preset.brightnessBoost));
-      ({ r, g, b } = hslToRgb(h, s2, l2));
-    }
-
-    r = clamp01(r * (1 - whiteness) + whiteness);
-    g = clamp01(g * (1 - whiteness) + whiteness);
-    b = clamp01(b * (1 - whiteness) + whiteness);
-
-    if (preset.alphaCap !== undefined) {
-      r = Math.min(r, preset.alphaCap);
-      g = Math.min(g, preset.alphaCap);
-      b = Math.min(b, preset.alphaCap);
-    }
-
-    return { ...bar, amplitude: amp, color: { r, g, b }, whiteness };
-  });
-
-  if (preset.smoothingWindow && preset.smoothingWindow > 1) {
-    const w = preset.smoothingWindow;
-    for (let i = 0; i < bars.length; i++) {
-      let sum = 0;
-      let count = 0;
-      for (let k = -w; k <= w; k++) {
-        const idx = i + k;
-        if (idx >= 0 && idx < bars.length) {
-          sum += bars[idx].amplitude;
-          count += 1;
-        }
-      }
-      bars[i].amplitude = sum / Math.max(1, count);
-    }
-  }
-
-  return { ...waveform, bars };
-}
-
 function toAudioBuffer(pcm: { samples: Float32Array; sampleRate: number }): PseudoAudioBuffer {
   return {
     length: pcm.samples.length,
@@ -324,54 +175,6 @@ function toAudioBuffer(pcm: { samples: Float32Array; sampleRate: number }): Pseu
     duration: pcm.samples.length / pcm.sampleRate,
     getChannelData: () => pcm.samples,
   };
-}
-
-function clamp01(value: number) {
-  return Math.min(1, Math.max(0, value));
-}
-
-function rgbToHsl(r: number, g: number, b: number) {
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h = 0, s = 0;
-  const l = (max + min) / 2;
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case r:
-        h = (g - b) / d + (g < b ? 6 : 0);
-        break;
-      case g:
-        h = (b - r) / d + 2;
-        break;
-      default:
-        h = (r - g) / d + 4;
-    }
-    h /= 6;
-  }
-  return { h, s, l };
-}
-
-function hslToRgb(h: number, s: number, l: number) {
-  let r: number, g: number, b: number;
-  if (s === 0) {
-    r = g = b = l;
-  } else {
-    const hue2rgb = (p: number, q: number, t: number) => {
-      if (t < 0) t += 1;
-      if (t > 1) t -= 1;
-      if (t < 1 / 6) return p + (q - p) * 6 * t;
-      if (t < 1 / 2) return q;
-      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-      return p;
-    };
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    r = hue2rgb(p, q, h + 1 / 3);
-    g = hue2rgb(p, q, h);
-    b = hue2rgb(p, q, h - 1 / 3);
-  }
-  return { r, g, b };
 }
 
 function slugify(value: string): string {

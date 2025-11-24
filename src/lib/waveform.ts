@@ -22,6 +22,109 @@ export type WaveformAnalysisOptions = {
   fftSize?: number;
 };
 
+export type PresetKey =
+  | "reference-clean"
+  | "vivid-studio"
+  | "crisp-micro"
+  | "balanced-film"
+  | "darkroom-contrast"
+  | "soft-pastel"
+  | "chrome-accurate"
+  | "gridliner"
+  | "smoothed-hifi"
+  | "airy-highlight";
+
+export type PresetConfig = {
+  resolution: number;
+  fftSize: number;
+  amplitudeGamma: number;
+  saturationBoost: number; // e.g. 0.12 = +12%
+  brightnessBoost: number; // 0.1 = +10%
+  alphaCap?: number;
+  highsCap?: number;
+  smoothingWindow?: number;
+};
+
+// Keep in sync with scripts/preprocess-waveform.ts and containers/analyzer
+export const PRESETS: Record<PresetKey, PresetConfig> = {
+  "reference-clean": {
+    resolution: 5000,
+    fftSize: 4096,
+    amplitudeGamma: 0.9,
+    saturationBoost: 10.0,
+    brightnessBoost: 0.05,
+  },
+  "vivid-studio": {
+    resolution: 2000,
+    fftSize: 4096,
+    amplitudeGamma: 1,
+    saturationBoost: 0.12,
+    brightnessBoost: 0.05,
+    highsCap: 0.25,
+  },
+  "crisp-micro": {
+    resolution: 3200,
+    fftSize: 2048,
+    amplitudeGamma: 1,
+    saturationBoost: 0,
+    brightnessBoost: 0,
+    alphaCap: 0.7,
+  },
+  "balanced-film": {
+    resolution: 1800,
+    fftSize: 4096,
+    amplitudeGamma: 1,
+    saturationBoost: -0.08,
+    brightnessBoost: 0.1,
+  },
+  "darkroom-contrast": {
+    resolution: 2400,
+    fftSize: 4096,
+    amplitudeGamma: 1,
+    saturationBoost: -0.12,
+    brightnessBoost: -0.05,
+    highsCap: 0.2,
+  },
+  "soft-pastel": {
+    resolution: 2000,
+    fftSize: 2048,
+    amplitudeGamma: 1.1,
+    saturationBoost: -0.25,
+    brightnessBoost: 0.2,
+  },
+  "chrome-accurate": {
+    resolution: 2200,
+    fftSize: 4096,
+    amplitudeGamma: 1,
+    saturationBoost: 0.05,
+    brightnessBoost: 0.05,
+    highsCap: 0.25,
+  },
+  "gridliner": {
+    resolution: 2600,
+    fftSize: 2048,
+    amplitudeGamma: 0.95,
+    saturationBoost: 0,
+    brightnessBoost: 0,
+  },
+  "smoothed-hifi": {
+    resolution: 2200,
+    fftSize: 2048,
+    amplitudeGamma: 1,
+    saturationBoost: 0,
+    brightnessBoost: 0,
+    smoothingWindow: 5,
+  },
+  "airy-highlight": {
+    resolution: 2100,
+    fftSize: 4096,
+    amplitudeGamma: 1,
+    saturationBoost: 0,
+    brightnessBoost: 0.05,
+    highsCap: 0.2,
+  },
+};
+
 const DEFAULT_RESOLUTION = 1800;
 const DEFAULT_FFT_SIZE = 2048;
 
@@ -96,22 +199,22 @@ const bars: WaveformBar[] = bandsPerBar.map((band) => {
     const amplitude = normalize(band.total, maxima.total, 0.7);
     const bass = normalize(band.bass, maxima.bass, 0.6);
 
-    // Tilt melody up relative to voice for clearer blue, but still keep vocals present.
-    const voiceWeight = 1.0;
-    const melodyWeight = 1.35;
-    const voice = normalize(band.voice * voiceWeight, maxima.voice * voiceWeight, 0.62);
+    // Nudge voice upward and melody slightly downward to bring back greens.
+    const voiceWeight = 1.15;
+    const melodyWeight = 1.2;
+    const voice = normalize(band.voice * voiceWeight, maxima.voice * voiceWeight, 0.6);
     const melody = normalize(band.melody * melodyWeight, maxima.melody * melodyWeight, 0.5);
     const air = normalize(band.air, maxima.air, 0.9);
 
-    // Cap whiteness to avoid washing colors.
-    const whiteness = clamp(Math.pow(air, 1.1) * 0.25, 0, 0.25);
+    // Lower whiteness contribution so colors stay saturated.
+    const whiteness = clamp(Math.pow(air, 1.05) * 0.2, 0, 0.22);
 
     return {
       amplitude,
       color: {
         r: clamp(bass * 1.18 * (1 - whiteness) + whiteness * 0.8),
-        g: clamp(voice * 1.08 * (1 - whiteness) + whiteness * 0.9),
-        b: clamp(melody * 1.45 * (1 - whiteness) + whiteness),
+        g: clamp(voice * 1.22 * (1 - whiteness) + whiteness * 0.8),
+        b: clamp(melody * 1.38 * (1 - whiteness) + whiteness),
       },
       whiteness,
     };
@@ -122,6 +225,59 @@ const bars: WaveformBar[] = bandsPerBar.map((band) => {
     durationSeconds: audioBuffer.duration,
     sampleRate: audioBuffer.sampleRate,
   };
+}
+
+export function applyPresetToWaveform(
+  waveform: WaveformData,
+  preset: PresetConfig,
+): WaveformData {
+  const gamma = preset.amplitudeGamma ?? 1;
+  const bars = waveform.bars.map((bar) => {
+    const amp = Math.pow(bar.amplitude, gamma);
+    let { r, g, b } = bar.color;
+    let whiteness = bar.whiteness ?? 0;
+
+    if (preset.highsCap !== undefined) {
+      whiteness = Math.min(whiteness, preset.highsCap);
+    }
+
+    if (preset.saturationBoost !== 0 || preset.brightnessBoost !== 0) {
+      const { h, s, l } = rgbToHsl(r, g, b);
+      const s2 = clamp01(s * (1 + preset.saturationBoost));
+      const l2 = clamp01(l * (1 + preset.brightnessBoost));
+      ({ r, g, b } = hslToRgb(h, s2, l2));
+    }
+
+    r = clamp01(r * (1 - whiteness) + whiteness);
+    g = clamp01(g * (1 - whiteness) + whiteness);
+    b = clamp01(b * (1 - whiteness) + whiteness);
+
+    if (preset.alphaCap !== undefined) {
+      r = Math.min(r, preset.alphaCap);
+      g = Math.min(g, preset.alphaCap);
+      b = Math.min(b, preset.alphaCap);
+    }
+
+    return { ...bar, amplitude: amp, color: { r, g, b }, whiteness };
+  });
+
+  if (preset.smoothingWindow && preset.smoothingWindow > 1) {
+    const w = preset.smoothingWindow;
+    for (let i = 0; i < bars.length; i++) {
+      let sum = 0;
+      let count = 0;
+      for (let k = -w; k <= w; k++) {
+        const idx = i + k;
+        if (idx >= 0 && idx < bars.length) {
+          sum += bars[idx].amplitude;
+          count += 1;
+        }
+      }
+      bars[i].amplitude = sum / Math.max(1, count);
+    }
+  }
+
+  return { ...waveform, bars };
 }
 
 function mixToMono(buffer: AudioBuffer): Float32Array {
@@ -195,4 +351,52 @@ function normalize(value: number, max: number, gamma = 1): number {
 
 function clamp(value: number, min = 0, max = 1): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function clamp01(value: number) {
+  return clamp(value, 0, 1);
+}
+
+function rgbToHsl(r: number, g: number, b: number) {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r:
+        h = (g - b) / d + (g < b ? 6 : 0);
+        break;
+      case g:
+        h = (b - r) / d + 2;
+        break;
+      default:
+        h = (r - g) / d + 4;
+    }
+    h /= 6;
+  }
+  return { h, s, l };
+}
+
+function hslToRgb(h: number, s: number, l: number) {
+  let r: number, g: number, b: number;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p: number, q: number, t: number) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1 / 3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1 / 3);
+  }
+  return { r, g, b };
 }

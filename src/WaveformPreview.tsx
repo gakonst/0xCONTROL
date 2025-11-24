@@ -9,29 +9,25 @@ import {
   type SetStateAction,
 } from "react";
 
-import {
-  analyzeWaveformFromBuffer,
-  type WaveformData,
-} from "@/lib/waveform";
-import { FFmpeg } from "@ffmpeg/ffmpeg/dist/esm/classes.js";
-
-type LocalManifestEntry = {
-  fileName?: string;
-  name?: string;
-  artist?: string;
-};
+import { buildApiUrl } from "@/lib/api";
+import { type WaveformData } from "@/lib/waveform";
+// Note: We analyze waveforms in the browser using the Web Audio API. No ffmpeg wasm needed here.
 
 type TrackSource = {
   label: string;
   url: string;
   originalName?: string;
-  waveformUrl?: string;
   /** fetches the raw audio bytes to decode */
   fetchArrayBuffer: () => Promise<ArrayBuffer>;
 };
 
-const SAMPLE_MANIFEST_URL = "/tracks/manifest.json";
-const FALLBACK_SAMPLE = "/tracks/Anyma, Argy, Son of Son - Voices In My Head.mp3";
+type CatalogRecord = {
+  id?: string;
+  path?: string;
+  name?: string;
+  artist?: string;
+  durationSeconds?: number | null;
+};
 
 export function WaveformPreview() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -43,79 +39,52 @@ export function WaveformPreview() {
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeSourceLabel, setActiveSourceLabel] = useState<string>("none");
-  const [sampleChoice, setSampleChoice] = useState<TrackSource | null>(null);
+  const [catalog, setCatalog] = useState<TrackSource[]>([]);
+  const [selectedTrack, setSelectedTrack] = useState<TrackSource | null>(null);
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-
-    const loadManifest = async () => {
+    const loadCatalog = async () => {
+      setIsLoadingCatalog(true);
       try {
-        const response = await fetch(SAMPLE_MANIFEST_URL, { cache: "no-store" });
-        if (!response.ok) throw new Error(`manifest status ${response.status}`);
-        const manifest = (await response.json()) as LocalManifestEntry[];
-        const first = manifest[0];
+        const response = await fetch(buildApiUrl("/api/catalog"), {
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error(`catalog status ${response.status}`);
+        const payload = (await response.json()) as { tracks?: CatalogRecord[] };
         if (cancelled) return;
-        const fileName = first?.fileName ?? FALLBACK_SAMPLE.split("/").pop()!;
-        const url = first?.fileName
-          ? `/tracks/${encodeURIComponent(first.fileName)}`
-          : FALLBACK_SAMPLE;
-        setSampleChoice(
-          buildRemoteSource(
-            url,
-            first?.name ?? "Sample Track",
-            buildWaveformUrlFromFileName(fileName),
-          ),
-        );
+        const sources = (payload.tracks ?? [])
+          .map(buildR2SourceFromCatalog)
+          .filter(Boolean) as TrackSource[];
+        setCatalog(sources);
+        setSelectedTrack((prev) => prev ?? sources[0] ?? null);
       } catch (error) {
-        if (cancelled) return;
-        // still provide a fallback sample
-        setSampleChoice(
-          buildRemoteSource(
-            FALLBACK_SAMPLE,
-            "Sample Track",
-            buildWaveformUrlFromFileName(
-              "Anyma, Argy, Son of Son - Voices In My Head.mp3",
-            ),
-          ),
-        );
-        console.warn("manifest load failed", error);
+        if (!cancelled) {
+          console.error("catalog load failed", error);
+        }
+      } finally {
+        if (!cancelled) setIsLoadingCatalog(false);
       }
     };
 
-    loadManifest();
+    loadCatalog();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const handleFileChosen = useCallback(
-    async (file: File) => {
-      const objectUrl = URL.createObjectURL(file);
-      const source: TrackSource = {
-        label: file.name,
-        url: objectUrl,
-        originalName: file.name,
-        waveformUrl: buildWaveformUrlFromFileName(file.name),
-        fetchArrayBuffer: () => file.arrayBuffer(),
-      };
-      await loadSource(source, true);
-    },
-    [],
-  );
-
   const loadSource = useCallback(
-    async (source: TrackSource, isObjectUrl = false) => {
+    async (source: TrackSource) => {
       setIsAnalyzing(true);
       setAnalysisError(null);
       setWaveform(null);
       setActiveSourceLabel(source.label);
 
       try {
-        const analyzed = await loadPrecomputedWaveform(source.waveformUrl);
+        const analyzed = await analyzeWithWorker(source);
         if (!analyzed) {
-          throw new Error(
-            "No precomputed waveform found. Run `bun scripts/preprocess-waveform.ts <audio>` first.",
-          );
+          throw new Error("Unable to analyze waveform (analyzer unavailable).");
         }
         setWaveform(analyzed);
         setDuration(analyzed.durationSeconds);
@@ -136,20 +105,17 @@ export function WaveformPreview() {
         setAnalysisError(message);
       } finally {
         setIsAnalyzing(false);
-        if (isObjectUrl) {
-          // revoke once the audio element no longer needs it (after src is set)
-          setTimeout(() => URL.revokeObjectURL(source.url), 60_000);
-        }
       }
     },
     [],
   );
 
-  const handleSampleLoad = useCallback(async () => {
-    if (sampleChoice) {
-      await loadSource(sampleChoice);
+  // Analyze whenever selection changes.
+  useEffect(() => {
+    if (selectedTrack) {
+      void loadSource(selectedTrack);
     }
-  }, [loadSource, sampleChoice]);
+  }, [selectedTrack, loadSource]);
 
   const liveTime = useCallback(() => audioRef.current?.currentTime ?? 0, []);
 
@@ -161,53 +127,51 @@ export function WaveformPreview() {
   const hasWaveform = waveform && waveform.bars.length > 0;
 
   return (
-    <div className="min-h-screen w-full bg-[#05070f] text-white">
+    <div className="min-h-screen w-full bg-gradient-to-b from-[#05070f] via-[#0a0f1d] to-black text-white">
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-8">
         <header className="flex flex-col gap-2">
-          <p className="text-sm uppercase tracking-[0.2em] text-slate-400">Waveform Lab</p>
-          <h1 className="text-3xl font-semibold">Rekordbox-style RGB waveform</h1>
+          <p className="text-sm uppercase tracking-[0.25em] text-slate-400">Waveform Lab</p>
+          <h1 className="text-3xl font-semibold text-white drop-shadow">Rekordbox-style RGB waveform</h1>
           <p className="max-w-3xl text-slate-300">
             Bass → red, voice → green, melody → blue, air → white. Click the waveform to seek.
             The playhead is white while playing and turns red when paused.
           </p>
         </header>
 
-        <section className="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-4 shadow-xl shadow-blue-500/5">
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="cursor-pointer rounded-full border border-slate-700/70 bg-slate-800/60 px-4 py-2 text-sm font-medium hover:border-slate-500">
-              Upload audio
-              <input
-                type="file"
-                accept="audio/*"
-                className="hidden"
+        <section className="rounded-2xl border border-slate-800/70 bg-slate-900/60 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2 text-sm text-slate-200">
+              <label className="text-xs uppercase tracking-wide text-slate-400">Catalog</label>
+              <select
+                className="min-w-[280px] rounded-xl border border-slate-700/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 shadow-inner shadow-slate-900/40 focus:border-indigo-300 focus:outline-none"
+                disabled={!catalog.length || isLoadingCatalog || isAnalyzing}
+                value={selectedTrack?.originalName ?? ""}
                 onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) handleFileChosen(file);
-        }}
-      />
-      </label>
+                  const next = catalog.find((c) => c.originalName === event.target.value) ?? null;
+                  setSelectedTrack(next);
+                }}
+              >
+                <option value="" disabled>
+                  {isLoadingCatalog ? "Loading tracks…" : "Select a track"}
+                </option>
+                {catalog.map((entry) => (
+                  <option key={entry.originalName ?? entry.label} value={entry.originalName ?? entry.label}>
+                    {entry.label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-            <button
-              type="button"
-              onClick={handleSampleLoad}
-              disabled={!sampleChoice || isAnalyzing}
-              className="rounded-full border border-indigo-400/60 bg-indigo-500/20 px-4 py-2 text-sm font-semibold text-indigo-100 shadow-sm shadow-indigo-500/20 transition hover:border-indigo-300 hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Load sample {sampleChoice ? `(${sampleChoice.label})` : ""}
-            </button>
-
-            <div className="ml-auto flex items-center gap-3 text-sm text-slate-300">
-              <span className="rounded-full bg-slate-800/80 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-200">
-                {activeSourceLabel === "none" ? "No track loaded" : activeSourceLabel}
-              </span>
+            <div className="ml-auto flex items-center gap-3 text-xs font-semibold uppercase tracking-wide text-slate-200">
+              <Pill>{activeSourceLabel === "none" ? "No track loaded" : activeSourceLabel}</Pill>
               {isAnalyzing && <PulseDot label="Analyzing" />}
               {!isAnalyzing && hasWaveform && <span className="text-emerald-300">Ready</span>}
             </div>
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5 shadow-xl shadow-indigo-500/5">
-          <div className="mb-4 flex items-center gap-3">
+        <section className="rounded-2xl border border-slate-800/70 bg-slate-900/60 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur">
+          <div className="mb-5 flex flex-wrap items-center gap-4">
             <button
               type="button"
               onClick={() => {
@@ -219,7 +183,7 @@ export function WaveformPreview() {
                   audio.pause();
                 }
               }}
-              className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-slate-900 shadow-lg shadow-slate-900/40 transition hover:-translate-y-0.5 active:translate-y-0"
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-slate-900 shadow-lg shadow-slate-900/50 transition hover:-translate-y-0.5 active:translate-y-0"
             >
               {isPlaying ? "❚❚" : "▶"}
             </button>
@@ -228,9 +192,16 @@ export function WaveformPreview() {
               <span className="font-semibold text-white">{formattedTime}</span>
               <span className="text-xs text-slate-400">Click waveform to jump</span>
             </div>
+
+            <div className="ml-auto flex items-center gap-2 text-xs uppercase tracking-wide text-slate-300">
+              <Pill subtle>{catalog.length ? `${catalog.length} tracks` : "Loading…"}</Pill>
+              <Pill subtle>{isPlaying ? "Playing" : "Paused"}</Pill>
+            </div>
           </div>
 
-          <div className="relative rounded-xl border border-slate-800/60 bg-slate-950/80 p-3">
+          <div className="relative overflow-hidden rounded-2xl border border-slate-800/60 bg-slate-950/80 p-3 shadow-[0_30px_60px_rgba(0,0,0,0.45)]">
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/3 via-transparent to-transparent" aria-hidden />
+
             <WaveformCanvas
               waveform={waveform}
               duration={duration}
@@ -247,8 +218,8 @@ export function WaveformPreview() {
             />
 
             {!hasWaveform && (
-              <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-slate-950/90 text-slate-400">
-                {isAnalyzing ? "Analyzing waveform…" : "Load an audio file to inspect the waveform"}
+              <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-slate-950/95 text-slate-300">
+                {isAnalyzing ? "Analyzing waveform…" : catalog.length ? "Select a track to inspect the waveform" : "Loading catalog…"}
               </div>
             )}
           </div>
@@ -263,13 +234,27 @@ export function WaveformPreview() {
           />
 
           {analysisError && (
-            <div className="mt-3 rounded-lg border border-rose-500/60 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
+            <div className="mt-4 rounded-lg border border-rose-500/60 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
               Waveform analysis failed: {analysisError}
             </div>
           )}
         </section>
       </div>
     </div>
+  );
+}
+
+function Pill({ children, subtle = false }: { children: React.ReactNode; subtle?: boolean }) {
+  return (
+    <span
+      className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${
+        subtle
+          ? "border border-slate-800/70 bg-slate-900/70 text-slate-300"
+          : "border border-slate-700/80 bg-slate-800/80 text-slate-100"
+      }`}
+    >
+      {children}
+    </span>
   );
 }
 
@@ -386,7 +371,23 @@ function WaveformCanvas({
     // soft glow overlay
     ctx.fillStyle = "rgba(255,255,255,0.08)";
     ctx.fillRect(0, midY - 0.5, size.width, 1);
-  }, [waveform, size.width, size.height]);
+
+    // second markers to mirror original preview
+    if (duration > 0) {
+      const pixelsPerSecond = size.width / Math.max(duration, 0.001);
+      const totalSeconds = Math.ceil(duration);
+      for (let s = 0; s <= totalSeconds; s += 1) {
+        const x = s * pixelsPerSecond;
+        if (x > size.width) break;
+        ctx.strokeStyle = s % 10 === 0 ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)";
+        ctx.lineWidth = s % 10 === 0 ? 1.5 : 1;
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, size.height);
+        ctx.stroke();
+      }
+    }
+  }, [waveform, size.width, size.height, duration]);
 
   // Render playhead overlay separate for smooth updates.
   useEffect(() => {
@@ -428,7 +429,7 @@ function WaveformCanvas({
   }, [duration, isPlaying, liveTimeGetter, baseCurrentTime, size.width, size.height]);
 
   return (
-    <div ref={containerRef} className="relative h-[260px] w-full">
+    <div ref={containerRef} className="relative h-[320px] w-full">
       <canvas
         ref={canvasRef}
         className="absolute inset-0 rounded-lg bg-slate-950"
@@ -456,11 +457,15 @@ function clamp(value: number, min = 0, max = 1) {
   return Math.min(max, Math.max(min, value));
 }
 
-function buildRemoteSource(url: string, label: string, waveformUrl?: string): TrackSource {
+function buildR2SourceFromCatalog(record?: CatalogRecord): TrackSource | null {
+  if (!record || !record.path) return null;
+  const label = record.name ?? record.path;
+  const path = record.path;
+  const url = buildApiUrl(`/api/tracks/${encodeURIComponent(path)}`);
   return {
     label,
     url,
-    waveformUrl,
+    originalName: path,
     fetchArrayBuffer: async () => {
       const response = await fetch(url);
       if (!response.ok) throw new Error(`audio request failed (${response.status})`);
@@ -469,26 +474,45 @@ function buildRemoteSource(url: string, label: string, waveformUrl?: string): Tr
   };
 }
 
-function buildWaveformUrlFromFileName(fileName?: string | null) {
-  if (!fileName) return undefined;
-  return `/tracks/waveforms/${encodeURIComponent(fileName)}.json`;
-}
+/**
+ * Ask the Cloudflare Worker + analyzer container to compute a waveform for a track
+ * that lives in R2. Returns null if unavailable or the request fails.
+ */
+async function analyzeWithWorker(source: TrackSource): Promise<WaveformData | null> {
+  const apiUrl = `${buildApiUrl("/api/analyze")}`;
 
-async function loadPrecomputedWaveform(url?: string | null) {
-  if (!url) return null;
+  // The worker expects either a trackId or path that matches the R2 object key.
+  const trackId = source.originalName ?? extractFileName(source.url);
+  if (!trackId) return null;
+
   try {
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) return null;
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: trackId }),
+    });
 
-    const contentType = response.headers.get("content-type") ?? "";
-    if (!contentType.toLowerCase().includes("application/json")) {
+    if (!response.ok) {
+      console.warn("worker analyze failed", response.status);
       return null;
     }
 
-    const data = (await response.json()) as WaveformData;
-    return data;
+    const payload = (await response.json()) as { waveform?: WaveformData };
+    if (payload?.waveform && Array.isArray(payload.waveform.bars)) {
+      return payload.waveform;
+    }
   } catch (error) {
-    console.warn("waveform fetch failed", error);
+    console.warn("worker analyze threw", error);
+  }
+  return null;
+}
+
+function extractFileName(url: string): string | null {
+  try {
+    const parsed = new URL(url, window.location.href);
+    const last = parsed.pathname.split("/").filter(Boolean).pop();
+    return last ? decodeURIComponent(last) : null;
+  } catch {
     return null;
   }
 }

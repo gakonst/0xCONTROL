@@ -1,6 +1,12 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
-import { analyzeWaveformFromBuffer, type WaveformData } from "./src/lib/waveform";
+import {
+  analyzeWaveformFromBuffer,
+  applyPresetToWaveform,
+  PRESETS,
+  type PresetKey,
+  type WaveformData,
+} from "./src/lib/waveform";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const MAX_INPUT_BYTES = 120 * 1024 * 1024; // ~120MB safety guard
@@ -111,6 +117,11 @@ async function handleAnalyze(req: IncomingMessage, res: ServerResponse, url: URL
   try {
     const resolutionParam = url.searchParams.get("resolution");
     const resolution = resolutionParam ? Number(resolutionParam) : undefined;
+    const presetKey = (url.searchParams.get("preset") as PresetKey | null) ?? "reference-clean";
+    const preset = PRESETS[presetKey] ?? PRESETS["reference-clean"];
+
+    const effectiveResolution = resolution ?? preset.resolution;
+    const fftSize = preset.fftSize;
 
     const body = await readBody(req);
     if (!body || body.byteLength === 0) {
@@ -122,11 +133,13 @@ async function handleAnalyze(req: IncomingMessage, res: ServerResponse, url: URL
     const pcm = await decodeToPCM(body);
     const waveform: WaveformData = await analyzeWaveformFromBuffer(
       toAudioBuffer(pcm) as any,
-      resolution ? { resolution } : undefined,
+      { resolution: effectiveResolution, fftSize },
     );
 
+    const finalWaveform = applyPresetToWaveform(waveform, preset);
+
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ waveform }));
+    res.end(JSON.stringify({ waveform: finalWaveform, preset: presetKey }));
   } catch (error) {
     console.error("Analyze failed", error);
     res.writeHead(500, { "Content-Type": "application/json" });
