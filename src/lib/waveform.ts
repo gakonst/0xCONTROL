@@ -367,7 +367,8 @@ export function estimateBpmFromBuffer(
   audioBuffer: AudioBuffer,
   opts: { minBpm?: number; maxBpm?: number } = {},
 ): number | null {
-  return estimateBpmAndOffsetFromBuffer(audioBuffer, opts).bpm;
+  const { bpm } = estimateBpmAndOffsetFromBuffer(audioBuffer, opts);
+  return bpm !== null ? Math.round(bpm) : null;
 }
 
 /**
