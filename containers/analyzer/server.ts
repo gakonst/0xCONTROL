@@ -4,7 +4,7 @@ import {
   analyzeWaveformFromBuffer,
   applyPresetToWaveform,
   PRESETS,
-  estimateBpmFromBuffer,
+  estimateBpmAndOffsetFromBuffer,
   type PresetKey,
   type WaveformData,
 } from "./src/lib/waveform";
@@ -138,10 +138,10 @@ async function handleAnalyze(req: IncomingMessage, res: ServerResponse, url: URL
     );
 
     const finalWaveform = applyPresetToWaveform(waveform, preset);
-    const bpm = estimateBpmFromBuffer(toAudioBuffer(pcm) as any);
+    const { bpm, beatOffsetSeconds } = estimateBpmAndOffsetFromBuffer(toAudioBuffer(pcm) as any);
 
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ waveform: finalWaveform, preset: presetKey, bpm }));
+    res.end(JSON.stringify({ waveform: finalWaveform, preset: presetKey, bpm, beatOffsetSeconds }));
   } catch (error) {
     console.error("Analyze failed", error);
     res.writeHead(500, { "Content-Type": "application/json" });

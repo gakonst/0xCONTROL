@@ -40,6 +40,7 @@ export function WaveformPreview() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [bpm, setBpm] = useState<number | null>(null);
+  const [beatOffsetSeconds, setBeatOffsetSeconds] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeSourceLabel, setActiveSourceLabel] = useState<string>("none");
   const [catalog, setCatalog] = useState<TrackSource[]>([]);
@@ -112,6 +113,7 @@ export function WaveformPreview() {
         setWaveform(analyzed.waveform);
         setDuration(analyzed.waveform.durationSeconds);
         setBpm(analyzed.bpm ?? null);
+        setBeatOffsetSeconds(analyzed.beatOffsetSeconds ?? null);
         setCurrentTime(0);
 
         const audio = audioRef.current;
@@ -247,6 +249,7 @@ export function WaveformPreview() {
               waveform={waveform}
               duration={duration}
               bpm={bpm ?? selectedTrack?.bpm ?? null}
+              beatOffsetSeconds={beatOffsetSeconds}
               zoom={1}
               isPlaying={isPlaying}
               baseCurrentTime={currentTime}
@@ -268,6 +271,7 @@ export function WaveformPreview() {
               waveform={waveform}
               duration={duration}
               bpm={bpm ?? selectedTrack?.bpm ?? null}
+              beatOffsetSeconds={beatOffsetSeconds}
               zoom={zoom}
               isPlaying={isPlaying}
               baseCurrentTime={currentTime}
@@ -338,6 +342,7 @@ type WaveformCanvasProps = {
   waveform: WaveformData | null;
   duration: number;
   bpm?: number | null;
+  beatOffsetSeconds?: number | null;
   zoom: number;
   isPlaying: boolean;
   baseCurrentTime: number;
@@ -349,6 +354,7 @@ function WaveformCanvas({
   waveform,
   duration,
   bpm,
+  beatOffsetSeconds,
   zoom,
   mirror = true,
   fixedCenter = false,
@@ -470,8 +476,10 @@ function WaveformCanvas({
       const offsetSec = startSec; // grid scrolls with window start
       if (bpm && bpm > 0 && Number.isFinite(bpm) && duration > 0) {
         const secondsPerBeat = 60 / bpm;
-        const firstBeatIndex = Math.floor(offsetSec / secondsPerBeat);
-        const firstBeatTime = firstBeatIndex * secondsPerBeat;
+        const beatOffset = beatOffsetSeconds ?? 0;
+        const viewStartRelative = offsetSec - beatOffset;
+        const firstBeatIndex = Math.floor(viewStartRelative / secondsPerBeat);
+        const firstBeatTime = firstBeatIndex * secondsPerBeat + beatOffset;
         const beats = Math.ceil(spanSec / secondsPerBeat) + 2;
         for (let i = 0; i <= beats; i += 1) {
           const tBeat = firstBeatTime + i * secondsPerBeat;
@@ -507,7 +515,7 @@ function WaveformCanvas({
 
     render();
     return () => cancelAnimationFrame(rafId);
-  }, [waveform, size.width, size.height, duration, bpm, zoom, mirror, fixedCenter, liveTimeGetter, baseCurrentTime]);
+  }, [waveform, size.width, size.height, duration, bpm, beatOffsetSeconds, zoom, mirror, fixedCenter, liveTimeGetter, baseCurrentTime]);
 
   // Smooth pan/scroll when zoomed in.
   useEffect(() => {
@@ -704,7 +712,7 @@ function lerp(a: number, b: number, t: number) {
  * Ask the Cloudflare Worker + analyzer container to compute a waveform for a track
  * that lives in R2. Returns null if unavailable or the request fails.
  */
-type AnalyzeResponse = { waveform: WaveformData; bpm?: number | null };
+type AnalyzeResponse = { waveform: WaveformData; bpm?: number | null; beatOffsetSeconds?: number | null };
 
 async function analyzeWithWorker(source: TrackSource): Promise<AnalyzeResponse | null> {
   const apiUrl = `${buildApiUrl("/api/analyze")}`;

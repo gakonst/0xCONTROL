@@ -18,6 +18,7 @@ export type WaveformData = {
 export type WaveformAnalysis = {
   waveform: WaveformData;
   bpm?: number | null;
+  beatOffsetSeconds?: number | null;
 };
 
 export type WaveformAnalysisOptions = {
@@ -366,27 +367,40 @@ export function estimateBpmFromBuffer(
   audioBuffer: AudioBuffer,
   opts: { minBpm?: number; maxBpm?: number } = {},
 ): number | null {
+  return estimateBpmAndOffsetFromBuffer(audioBuffer, opts).bpm;
+}
+
+/**
+ * BPM with phase offset (seconds from t=0 to the first strong beat in the correlation window).
+ */
+export function estimateBpmAndOffsetFromBuffer(
+  audioBuffer: AudioBuffer,
+  opts: { minBpm?: number; maxBpm?: number } = {},
+): { bpm: number | null; beatOffsetSeconds: number | null } {
   const minBpm = opts.minBpm ?? 70;
   const maxBpm = opts.maxBpm ?? 180;
-  if (minBpm <= 0 || maxBpm <= minBpm) return null;
+  if (minBpm <= 0 || maxBpm <= minBpm) return { bpm: null, beatOffsetSeconds: null };
 
   const mono = mixToMono(audioBuffer);
-  if (mono.length === 0) return null;
+  if (mono.length === 0) return { bpm: null, beatOffsetSeconds: null };
 
   // Build RMS envelope over hop-sized frames to reduce noise.
   const frameSize = 1024;
   const hop = 512;
   const envelope: number[] = [];
+  const rawEnvelope: number[] = [];
   for (let start = 0; start < mono.length; start += hop) {
     let sum = 0;
     const end = Math.min(start + frameSize, mono.length);
     const len = end - start;
     if (len <= 0) break;
     for (let i = start; i < end; i++) sum += mono[i] * mono[i];
-    envelope.push(Math.sqrt(sum / len));
+    const rms = Math.sqrt(sum / len);
+    envelope.push(rms);
+    rawEnvelope.push(rms);
   }
 
-  if (envelope.length < 8) return null;
+  if (envelope.length < 8) return { bpm: null, beatOffsetSeconds: null };
 
   // Normalize envelope to zero-mean, unit max to stabilize correlation.
   const mean = envelope.reduce((a, b) => a + b, 0) / envelope.length;
@@ -401,7 +415,7 @@ export function estimateBpmFromBuffer(
     envelope.length - 2,
     Math.round(envelopeRate * 60 / minBpm),
   );
-  if (maxLag <= minLag) return null;
+  if (maxLag <= minLag) return { bpm: null, beatOffsetSeconds: null };
 
   let bestLag = -1;
   let bestScore = -Infinity;
@@ -418,7 +432,7 @@ export function estimateBpmFromBuffer(
     }
   }
 
-  if (bestLag <= 0 || bestScore <= 0) return null;
+  if (bestLag <= 0 || bestScore <= 0) return { bpm: null, beatOffsetSeconds: null };
 
   // Parabolic peak interpolation for sub-lag precision.
   const left = scores[bestLag - 1] ?? bestScore;
@@ -429,13 +443,51 @@ export function estimateBpmFromBuffer(
 
   const secondsPerBeat = refinedLag / envelopeRate;
   let bpm = 60 / secondsPerBeat;
-  if (!Number.isFinite(bpm) || bpm <= 0) return null;
+  if (!Number.isFinite(bpm) || bpm <= 0) return { bpm: null, beatOffsetSeconds: null };
 
-  // Snap to a nearby integer if within 0.6 BPM to reduce 1-BPM drift (common in 4/4 EDM).
-  const snapped = Math.round(bpm);
-  if (Math.abs(snapped - bpm) <= 0.6) bpm = snapped;
+  // Refine to nearest musically plausible multiple/half if that is closer to an integer beat grid.
+  const candidates = [bpm, bpm * 2, bpm / 2].filter((v) => v >= minBpm && v <= maxBpm);
+  const pick = candidates.reduce((best, current) => {
+    const currentIntDelta = Math.abs(current - Math.round(current));
+    const bestIntDelta = Math.abs(best - Math.round(best));
+    return currentIntDelta < bestIntDelta ? current : best;
+  }, candidates[0] ?? bpm);
 
-  return Math.round(bpm);
+  bpm = pick;
+
+  // Phase anchor: strongest amplitude peak snapped to nearest beat
+  let beatOffsetSeconds: number | null = null;
+  if (rawEnvelope.length > 0 && Number.isFinite(secondsPerBeat) && secondsPerBeat > 0) {
+    let maxIdx = 0;
+    let maxVal = -Infinity;
+    for (let i = 0; i < rawEnvelope.length; i++) {
+      if (rawEnvelope[i] > maxVal) {
+        maxVal = rawEnvelope[i];
+        maxIdx = i;
+      }
+    }
+    const peakTime = maxIdx / envelopeRate;
+    beatOffsetSeconds = ((peakTime % secondsPerBeat) + secondsPerBeat) % secondsPerBeat;
+  } else {
+    // Fallback: find phase offset within one beat that maximizes correlation.
+    const step = Math.max(1, Math.floor(bestLag / 32));
+    let bestPhase = 0;
+    let bestPhaseScore = -Infinity;
+    for (let phase = 0; phase < bestLag; phase += step) {
+      let acc = 0;
+      for (let i = phase; i + bestLag < envelope.length; i += 1) {
+        acc += envelope[i] * envelope[i + bestLag];
+      }
+      if (acc > bestPhaseScore) {
+        bestPhaseScore = acc;
+        bestPhase = phase;
+      }
+    }
+    beatOffsetSeconds = bestPhase / envelopeRate;
+  }
+
+  // Keep precision for beat grid alignment; round display later in UI.
+  return { bpm: Number(bpm.toFixed(2)), beatOffsetSeconds: Number(beatOffsetSeconds.toFixed(3)) };
 }
 
 function clamp01(value: number) {
