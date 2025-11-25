@@ -235,22 +235,18 @@ export function WaveformPreview() {
               </div>
               <Pill subtle>{catalog.length ? `${catalog.length} tracks` : "Loading…"}</Pill>
               <Pill subtle>{isPlaying ? "Playing" : "Paused"}</Pill>
-              <Pill subtle>{bpm ? `${bpm} BPM` : "BPM analyzing"}</Pill>
+              <Pill subtle>{bpm ? `${Math.round(bpm)} BPM` : "BPM analyzing"}</Pill>
             </div>
           </div>
 
           <div className="space-y-4">
             {/* Overview pane */}
             <PaneLabel>Overview</PaneLabel>
-            <WaveformCanvas
-              compact
-              mirror={false}
-              fixedCenter={false}
+            <OverviewCanvas
               waveform={waveform}
               duration={duration}
               bpm={bpm ?? selectedTrack?.bpm ?? null}
               beatOffsetSeconds={beatOffsetSeconds}
-              zoom={1}
               isPlaying={isPlaying}
               baseCurrentTime={currentTime}
               liveTimeGetter={liveTime}
@@ -265,9 +261,7 @@ export function WaveformPreview() {
 
             {/* Zoomed detail pane */}
             <PaneLabel>Detail (8× default)</PaneLabel>
-            <WaveformCanvas
-              mirror
-              fixedCenter
+            <DetailCanvas
               waveform={waveform}
               duration={duration}
               bpm={bpm ?? selectedTrack?.bpm ?? null}
@@ -348,7 +342,33 @@ type WaveformCanvasProps = {
   baseCurrentTime: number;
   liveTimeGetter?: () => number;
   onSeek: (ratio: number) => void;
+  variant: "overview" | "detail";
+  mirror?: boolean;
+  fixedCenter?: boolean;
 };
+
+function OverviewCanvas(props: Omit<WaveformCanvasProps, "variant" | "mirror" | "fixedCenter" | "zoom">) {
+  return (
+    <WaveformCanvas
+      {...props}
+      variant="overview"
+      mirror={false}
+      fixedCenter={false}
+      zoom={1}
+    />
+  );
+}
+
+function DetailCanvas(props: Omit<WaveformCanvasProps, "variant" | "mirror" | "fixedCenter">) {
+  return (
+    <WaveformCanvas
+      {...props}
+      variant="detail"
+      mirror
+      fixedCenter
+    />
+  );
+}
 
 function WaveformCanvas({
   waveform,
@@ -356,14 +376,14 @@ function WaveformCanvas({
   bpm,
   beatOffsetSeconds,
   zoom,
-  mirror = true,
-  fixedCenter = false,
-  compact = false,
+  mirror,
+  fixedCenter,
+  variant,
   isPlaying,
   baseCurrentTime,
   liveTimeGetter,
   onSeek,
-}: WaveformCanvasProps & { mirror?: boolean; fixedCenter?: boolean; compact?: boolean }) {
+}: WaveformCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
@@ -374,7 +394,11 @@ function WaveformCanvas({
   const suppressNextClick = useRef(false);
   const smoothedCenter = useRef<number | null>(null);
 
-  const [size, setSize] = useState({ width: 960, height: compact ? 110 : 320 });
+  const isOverview = variant === "overview";
+  const effectiveMirror = mirror ?? !isOverview;
+  const effectiveFixedCenter = fixedCenter ?? !isOverview;
+
+  const [size, setSize] = useState({ width: 960, height: isOverview ? 88 : 320 });
 
   // Track resize to keep canvas crisp.
   useEffect(() => {
@@ -384,7 +408,7 @@ function WaveformCanvas({
       const entry = entries[0];
       if (!entry) return;
       const { width, height } = entry.contentRect;
-      const targetHeight = compact ? Math.max(96, Math.floor(height)) : Math.max(180, Math.floor(height));
+      const targetHeight = isOverview ? Math.max(72, Math.floor(height)) : Math.max(180, Math.floor(height));
       setSize({
         width: Math.max(320, Math.floor(width)),
         height: targetHeight,
@@ -430,7 +454,7 @@ function WaveformCanvas({
 
       ctx.clearRect(0, 0, size.width, size.height);
 
-      const amplitudeScale = compact ? 0.6 : 0.48;
+      const amplitudeScale = isOverview ? 1.0 : 0.48; // overview fills entire grid height
 
       for (let x = 0; x < size.width; x += 1) {
         const ratio = x / size.width;
@@ -451,7 +475,7 @@ function WaveformCanvas({
         const barColor = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
 
         ctx.fillStyle = barColor;
-        if (mirror) {
+        if (effectiveMirror) {
           const topY = midY - height;
           ctx.fillRect(x, topY, 1, height * 2);
         } else {
@@ -462,51 +486,56 @@ function WaveformCanvas({
       }
 
       // soft glow overlay
-      if (mirror) {
+      if (effectiveMirror) {
         ctx.fillStyle = "rgba(255,255,255,0.08)";
         ctx.fillRect(0, midY - 0.5, size.width, 1);
       } else {
-        const gridY = size.height * 0.68; // lower grid for compact overview only
+        const gridY = size.height * 0.68; // lower grid for overview only
         ctx.fillStyle = "rgba(255,255,255,0.06)";
         ctx.fillRect(0, gridY, size.width, 1);
       }
 
-      // Beat grid (preferred) or seconds grid fallback using the current view window span
-      const pixelsPerSecond = size.width / Math.max(spanSec || 0.001, 0.001);
-      const offsetSec = startSec; // grid scrolls with window start
-      if (bpm && bpm > 0 && Number.isFinite(bpm) && duration > 0) {
-        const secondsPerBeat = 60 / bpm;
-        const beatOffset = beatOffsetSeconds ?? 0;
-        const viewStartRelative = offsetSec - beatOffset;
-        const firstBeatIndex = Math.floor(viewStartRelative / secondsPerBeat);
-        const firstBeatTime = firstBeatIndex * secondsPerBeat + beatOffset;
-        const beats = Math.ceil(spanSec / secondsPerBeat) + 2;
-        for (let i = 0; i <= beats; i += 1) {
-          const tBeat = firstBeatTime + i * secondsPerBeat;
-          const x = (tBeat - offsetSec) * pixelsPerSecond;
-          if (x < -2 || x > size.width + 2) continue;
-          const isBar = (firstBeatIndex + i) % 4 === 0;
-          ctx.strokeStyle = isBar ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.10)";
-          ctx.lineWidth = isBar ? 1.5 : 1;
-          ctx.beginPath();
-          ctx.moveTo(x + 0.5, 0);
-          ctx.lineTo(x + 0.5, size.height);
-          ctx.stroke();
-        }
-      } else if (duration > 0) {
-        const firstSecond = Math.floor(offsetSec);
-        const totalSeconds = Math.ceil(spanSec) + 2;
-        for (let s = 0; s <= totalSeconds; s += 1) {
-          const tSec = firstSecond + s;
-          const x = (tSec - offsetSec) * pixelsPerSecond;
-          if (x < -2 || x > size.width + 2) continue;
-          const isTen = tSec % 10 === 0;
-          ctx.strokeStyle = isTen ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)";
-          ctx.lineWidth = isTen ? 1.5 : 1;
-          ctx.beginPath();
-          ctx.moveTo(x + 0.5, 0);
-          ctx.lineTo(x + 0.5, size.height);
-          ctx.stroke();
+      // Beat grid: skip entirely in overview for a cleaner mini-map.
+      if (!isOverview) {
+        const pixelsPerSecond = size.width / Math.max(spanSec || 0.001, 0.001);
+        const offsetSec = startSec; // grid scrolls with window start
+        const gridTop = 0;
+        const gridBottom = size.height;
+
+        if (bpm && bpm > 0 && Number.isFinite(bpm) && duration > 0) {
+          const secondsPerBeat = 60 / bpm;
+          const beatOffset = beatOffsetSeconds ?? 0;
+          const viewStartRelative = offsetSec - beatOffset;
+          const firstBeatIndex = Math.floor(viewStartRelative / secondsPerBeat);
+          const firstBeatTime = firstBeatIndex * secondsPerBeat + beatOffset;
+          const beats = Math.ceil(spanSec / secondsPerBeat) + 2;
+          for (let i = 0; i <= beats; i += 1) {
+            const tBeat = firstBeatTime + i * secondsPerBeat;
+            const x = (tBeat - offsetSec) * pixelsPerSecond;
+            if (x < -2 || x > size.width + 2) continue;
+            const isBar = (firstBeatIndex + i) % 4 === 0;
+            ctx.strokeStyle = isBar ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.10)";
+            ctx.lineWidth = isBar ? 1.5 : 1;
+            ctx.beginPath();
+            ctx.moveTo(x + 0.5, gridTop);
+            ctx.lineTo(x + 0.5, gridBottom);
+            ctx.stroke();
+          }
+        } else if (duration > 0) {
+          const firstSecond = Math.floor(offsetSec);
+          const totalSeconds = Math.ceil(spanSec) + 2;
+          for (let s = 0; s <= totalSeconds; s += 1) {
+            const tSec = firstSecond + s;
+            const x = (tSec - offsetSec) * pixelsPerSecond;
+            if (x < -2 || x > size.width + 2) continue;
+            const isTen = tSec % 10 === 0;
+            ctx.strokeStyle = isTen ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)";
+            ctx.lineWidth = isTen ? 1.5 : 1;
+            ctx.beginPath();
+            ctx.moveTo(x + 0.5, gridTop);
+            ctx.lineTo(x + 0.5, gridBottom);
+            ctx.stroke();
+          }
         }
       }
 
@@ -515,14 +544,14 @@ function WaveformCanvas({
 
     render();
     return () => cancelAnimationFrame(rafId);
-  }, [waveform, size.width, size.height, duration, bpm, beatOffsetSeconds, zoom, mirror, fixedCenter, liveTimeGetter, baseCurrentTime]);
+  }, [waveform, size.width, size.height, duration, bpm, beatOffsetSeconds, zoom, effectiveMirror, effectiveFixedCenter, liveTimeGetter, baseCurrentTime]);
 
   // Smooth pan/scroll when zoomed in.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const handleWheel = (event: WheelEvent) => {
-      if (zoom <= 1 || duration <= 0 || !fixedCenter) return;
+      if (zoom <= 1 || duration <= 0 || !effectiveFixedCenter) return;
       event.preventDefault();
       const liveTime = liveTimeGetter?.() ?? baseCurrentTime;
       const { spanSec } = computeViewWindow(duration, liveTime, zoom);
@@ -534,7 +563,7 @@ function WaveformCanvas({
     };
     el.addEventListener("wheel", handleWheel, { passive: false });
     return () => el.removeEventListener("wheel", handleWheel as any);
-  }, [zoom, duration, baseCurrentTime, liveTimeGetter, size.width, onSeek]);
+  }, [zoom, duration, baseCurrentTime, liveTimeGetter, size.width, onSeek, effectiveFixedCenter]);
 
   // Render playhead overlay separate for smooth updates.
   useEffect(() => {
@@ -559,7 +588,7 @@ function WaveformCanvas({
       const { startSec, endSec, spanSec } = computeViewWindow(duration, effectiveTime, zoom);
       const clampedTime = Math.max(startSec, Math.min(endSec, effectiveTime));
       const ratio = spanSec > 0 ? (clampedTime - startSec) / spanSec : 0;
-      const x = fixedCenter && zoom > 1.01 ? size.width / 2 : Math.max(0, Math.min(size.width, ratio * size.width));
+      const x = effectiveFixedCenter && zoom > 1.01 ? size.width / 2 : Math.max(0, Math.min(size.width, ratio * size.width));
 
       ctx.clearRect(0, 0, size.width, size.height);
       ctx.beginPath();
@@ -577,12 +606,12 @@ function WaveformCanvas({
 
     render();
     return () => cancelAnimationFrame(rafId);
-  }, [duration, isPlaying, liveTimeGetter, baseCurrentTime, size.width, size.height]);
+  }, [duration, isPlaying, liveTimeGetter, baseCurrentTime, size.width, size.height, effectiveFixedCenter]);
 
   return (
     <div
       ref={containerRef}
-      className={`relative w-full ${compact ? "h-[120px]" : "h-[320px]"} select-none`}
+      className={`relative w-full ${isOverview ? "h-[96px]" : "h-[320px]"} select-none`}
     >
       <canvas
         ref={canvasRef}
@@ -592,7 +621,7 @@ function WaveformCanvas({
           dragging.current = true;
           dragStartX.current = event.clientX;
           dragStartTime.current = liveTimeGetter?.() ?? baseCurrentTime;
-          if (fixedCenter && zoom > 1) {
+          if (effectiveFixedCenter && zoom > 1) {
             dragPreviewTime.current = dragStartTime.current;
             event.currentTarget.style.cursor = "grabbing";
           } else {
@@ -602,7 +631,7 @@ function WaveformCanvas({
         }}
         onMouseMove={(event) => {
           if (!duration) return;
-          if (dragging.current && fixedCenter && zoom > 1) {
+          if (dragging.current && effectiveFixedCenter && zoom > 1) {
             const rect = event.currentTarget.getBoundingClientRect();
             const deltaPx = event.clientX - (dragStartX.current ?? event.clientX);
             const { spanSec } = computeViewWindow(duration, dragStartTime.current ?? baseCurrentTime, zoom);
@@ -617,10 +646,10 @@ function WaveformCanvas({
           }
         }}
         onMouseUp={(event) => {
-          if (dragging.current && fixedCenter && zoom > 1 && dragPreviewTime.current !== null) {
+          if (dragging.current && effectiveFixedCenter && zoom > 1 && dragPreviewTime.current !== null) {
             suppressNextClick.current = true;
             onSeek(dragPreviewTime.current / Math.max(duration, 0.001));
-          } else if (dragging.current && !fixedCenter) {
+          } else if (dragging.current && !effectiveFixedCenter) {
             // finalize scrub to the release position
             const canvas = canvasRef.current;
             if (canvas) {
@@ -644,7 +673,7 @@ function WaveformCanvas({
           if (!duration) return;
           const rect = event.currentTarget.getBoundingClientRect();
           const ratio = clamp((event.clientX - rect.left) / Math.max(rect.width, 1), 0, 1);
-          if (fixedCenter && zoom > 1) {
+          if (effectiveFixedCenter && zoom > 1) {
             const { startSec, spanSec } = computeViewWindow(duration, baseCurrentTime, zoom);
             const nextTime = startSec + ratio * spanSec;
             onSeek(nextTime / Math.max(duration, 0.001));
