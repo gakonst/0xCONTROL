@@ -364,6 +364,8 @@ function WaveformCanvas({
   const dragging = useRef(false);
   const dragStartX = useRef<number | null>(null);
   const dragStartTime = useRef<number | null>(null);
+  const dragPreviewTime = useRef<number | null>(null);
+  const suppressNextClick = useRef(false);
   const smoothedCenter = useRef<number | null>(null);
 
   const [size, setSize] = useState({ width: 960, height: compact ? 110 : 320 });
@@ -407,9 +409,10 @@ function WaveformCanvas({
     let rafId: number;
     const render = () => {
       const liveTime = liveTimeGetter?.() ?? baseCurrentTime;
+      const effectiveTime = dragging.current && dragPreviewTime.current !== null ? dragPreviewTime.current : liveTime;
 
       // Snap immediately: no smoothing glide even while playing
-      smoothedCenter.current = liveTime;
+      smoothedCenter.current = effectiveTime;
 
       const centerForView = smoothedCenter.current ?? liveTime;
 
@@ -543,9 +546,10 @@ function WaveformCanvas({
     let rafId: number;
     const render = () => {
       const liveTime = liveTimeGetter?.() ?? baseCurrentTime;
+      const effectiveTime = dragging.current && dragPreviewTime.current !== null ? dragPreviewTime.current : liveTime;
 
-      const { startSec, endSec, spanSec } = computeViewWindow(duration, liveTime, zoom);
-      const clampedTime = Math.max(startSec, Math.min(endSec, liveTime));
+      const { startSec, endSec, spanSec } = computeViewWindow(duration, effectiveTime, zoom);
+      const clampedTime = Math.max(startSec, Math.min(endSec, effectiveTime));
       const ratio = spanSec > 0 ? (clampedTime - startSec) / spanSec : 0;
       const x = fixedCenter && zoom > 1.01 ? size.width / 2 : Math.max(0, Math.min(size.width, ratio * size.width));
 
@@ -577,11 +581,16 @@ function WaveformCanvas({
         className="absolute inset-0 rounded-lg bg-slate-950 cursor-pointer"
         onMouseDown={(event) => {
           if (!duration) return;
-          if (!(fixedCenter && zoom > 1)) return; // overview stays click-only
           dragging.current = true;
           dragStartX.current = event.clientX;
           dragStartTime.current = liveTimeGetter?.() ?? baseCurrentTime;
-          event.currentTarget.style.cursor = "grabbing";
+          if (fixedCenter && zoom > 1) {
+            dragPreviewTime.current = dragStartTime.current;
+            event.currentTarget.style.cursor = "grabbing";
+          } else {
+            dragPreviewTime.current = null;
+            event.currentTarget.style.cursor = "pointer";
+          }
         }}
         onMouseMove={(event) => {
           if (!duration) return;
@@ -590,17 +599,40 @@ function WaveformCanvas({
             const deltaPx = event.clientX - (dragStartX.current ?? event.clientX);
             const { spanSec } = computeViewWindow(duration, dragStartTime.current ?? baseCurrentTime, zoom);
             const secondsPerPixel = spanSec / Math.max(rect.width, 1);
-            const nextTime = clamp((dragStartTime.current ?? baseCurrentTime) + deltaPx * secondsPerPixel, 0, duration);
-            onSeek(nextTime / Math.max(duration, 0.001));
+            // Invert drag direction: dragging canvas left moves playhead right (DJ-style grab)
+            const nextTime = clamp((dragStartTime.current ?? baseCurrentTime) - deltaPx * secondsPerPixel, 0, duration);
+            dragPreviewTime.current = nextTime;
+          } else if (dragging.current) {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const ratio = clamp((event.clientX - rect.left) / Math.max(rect.width, 1), 0, 1);
+            onSeek(ratio);
           }
         }}
-        onMouseUp={() => {
+        onMouseUp={(event) => {
+          if (dragging.current && fixedCenter && zoom > 1 && dragPreviewTime.current !== null) {
+            suppressNextClick.current = true;
+            onSeek(dragPreviewTime.current / Math.max(duration, 0.001));
+          } else if (dragging.current && !fixedCenter) {
+            // finalize scrub to the release position
+            const canvas = canvasRef.current;
+            if (canvas) {
+              const rect = canvas.getBoundingClientRect();
+              const ratio = clamp((event.clientX - rect.left) / Math.max(rect.width, 1), 0, 1);
+              onSeek(ratio);
+            }
+          }
           dragging.current = false;
+          dragPreviewTime.current = null;
         }}
         onMouseLeave={() => {
           dragging.current = false;
+          dragPreviewTime.current = null;
         }}
         onClick={(event) => {
+          if (suppressNextClick.current) {
+            suppressNextClick.current = false;
+            return;
+          }
           if (!duration) return;
           const rect = event.currentTarget.getBoundingClientRect();
           const ratio = clamp((event.clientX - rect.left) / Math.max(rect.width, 1), 0, 1);
