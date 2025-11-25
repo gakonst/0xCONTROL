@@ -15,6 +15,11 @@ export type WaveformData = {
   sampleRate: number;
 };
 
+export type WaveformAnalysis = {
+  waveform: WaveformData;
+  bpm?: number | null;
+};
+
 export type WaveformAnalysisOptions = {
   /** number of vertical bars to render across the waveform */
   resolution?: number;
@@ -351,6 +356,86 @@ function normalize(value: number, max: number, gamma = 1): number {
 
 function clamp(value: number, min = 0, max = 1): number {
   return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * Lightweight BPM estimator using an energy envelope + autocorrelation.
+ * Returns a rounded BPM or null if no clear peak is found.
+ */
+export function estimateBpmFromBuffer(
+  audioBuffer: AudioBuffer,
+  opts: { minBpm?: number; maxBpm?: number } = {},
+): number | null {
+  const minBpm = opts.minBpm ?? 70;
+  const maxBpm = opts.maxBpm ?? 180;
+  if (minBpm <= 0 || maxBpm <= minBpm) return null;
+
+  const mono = mixToMono(audioBuffer);
+  if (mono.length === 0) return null;
+
+  // Build RMS envelope over hop-sized frames to reduce noise.
+  const frameSize = 1024;
+  const hop = 512;
+  const envelope: number[] = [];
+  for (let start = 0; start < mono.length; start += hop) {
+    let sum = 0;
+    const end = Math.min(start + frameSize, mono.length);
+    const len = end - start;
+    if (len <= 0) break;
+    for (let i = start; i < end; i++) sum += mono[i] * mono[i];
+    envelope.push(Math.sqrt(sum / len));
+  }
+
+  if (envelope.length < 8) return null;
+
+  // Normalize envelope to zero-mean, unit max to stabilize correlation.
+  const mean = envelope.reduce((a, b) => a + b, 0) / envelope.length;
+  for (let i = 0; i < envelope.length; i++) envelope[i] -= mean;
+  let maxAbs = 0;
+  for (const v of envelope) maxAbs = Math.max(maxAbs, Math.abs(v));
+  if (maxAbs > 0) for (let i = 0; i < envelope.length; i++) envelope[i] /= maxAbs;
+
+  const envelopeRate = audioBuffer.sampleRate / hop; // samples of envelope per second
+  const minLag = Math.max(1, Math.round(envelopeRate * 60 / maxBpm));
+  const maxLag = Math.min(
+    envelope.length - 2,
+    Math.round(envelopeRate * 60 / minBpm),
+  );
+  if (maxLag <= minLag) return null;
+
+  let bestLag = -1;
+  let bestScore = -Infinity;
+  const scores: number[] = new Array(maxLag + 1).fill(0);
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let acc = 0;
+    for (let i = 0; i + lag < envelope.length; i++) {
+      acc += envelope[i] * envelope[i + lag];
+    }
+    scores[lag] = acc;
+    if (acc > bestScore) {
+      bestScore = acc;
+      bestLag = lag;
+    }
+  }
+
+  if (bestLag <= 0 || bestScore <= 0) return null;
+
+  // Parabolic peak interpolation for sub-lag precision.
+  const left = scores[bestLag - 1] ?? bestScore;
+  const right = scores[bestLag + 1] ?? bestScore;
+  const denom = left - 2 * bestScore + right;
+  const peakOffset = denom !== 0 ? 0.5 * (left - right) / denom : 0;
+  const refinedLag = Math.max(minLag, Math.min(maxLag, bestLag + peakOffset));
+
+  const secondsPerBeat = refinedLag / envelopeRate;
+  let bpm = 60 / secondsPerBeat;
+  if (!Number.isFinite(bpm) || bpm <= 0) return null;
+
+  // Snap to a nearby integer if within 0.6 BPM to reduce 1-BPM drift (common in 4/4 EDM).
+  const snapped = Math.round(bpm);
+  if (Math.abs(snapped - bpm) <= 0.6) bpm = snapped;
+
+  return Math.round(bpm);
 }
 
 function clamp01(value: number) {

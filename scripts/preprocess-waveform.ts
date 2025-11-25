@@ -15,6 +15,7 @@ import { basename, dirname, join, relative, sep } from "node:path";
 import {
   analyzeWaveformFromBuffer,
   applyPresetToWaveform,
+  estimateBpmFromBuffer,
   PRESETS,
   type PresetConfig,
   type PresetKey,
@@ -39,6 +40,7 @@ async function main() {
   const pcm = await decodeToPCM(input);
   const audioBuffer = toAudioBuffer(pcm);
   const durationSeconds = pcm.samples.length / pcm.sampleRate;
+  const bpm = estimateBpmFromBuffer(audioBuffer as any);
 
   const slug = slugify(basename(input));
   const latestJsonPath = join(outputDir, "waveform.json");
@@ -59,6 +61,7 @@ async function main() {
       input,
       outputDir,
       durationSeconds,
+      bpm,
       waveform: transformedWaveform,
       presetKey: key,
     });
@@ -360,6 +363,7 @@ function buildPayload(params: {
   input: string;
   outputDir: string;
   durationSeconds: number;
+  bpm?: number | null;
   waveform: { bars: any[]; durationSeconds?: number; sampleRate: number };
   presetKey: PresetKey;
 }) {
@@ -370,6 +374,7 @@ function buildPayload(params: {
     generatedAt: new Date().toISOString(),
     sampleRate: params.waveform.sampleRate,
     durationSeconds: params.durationSeconds,
+    bpm: params.bpm ?? null,
     waveform: { ...params.waveform, durationSeconds: params.durationSeconds },
     preset: params.presetKey,
   };

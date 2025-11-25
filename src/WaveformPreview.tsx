@@ -17,6 +17,7 @@ type TrackSource = {
   label: string;
   url: string;
   originalName?: string;
+  bpm?: number | null;
   /** fetches the raw audio bytes to decode */
   fetchArrayBuffer: () => Promise<ArrayBuffer>;
 };
@@ -27,6 +28,7 @@ type CatalogRecord = {
   name?: string;
   artist?: string;
   durationSeconds?: number | null;
+  bpm?: number | null;
 };
 
 export function WaveformPreview() {
@@ -37,11 +39,13 @@ export function WaveformPreview() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [bpm, setBpm] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeSourceLabel, setActiveSourceLabel] = useState<string>("none");
   const [catalog, setCatalog] = useState<TrackSource[]>([]);
   const [selectedTrack, setSelectedTrack] = useState<TrackSource | null>(null);
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
+  const [zoom, setZoom] = useState(8.0); // detail pane default 8x
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +78,25 @@ export function WaveformPreview() {
     };
   }, []);
 
+  // Spacebar play/pause toggle (when not typing in inputs)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.code !== "Space") return;
+      const target = event.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName)) return;
+      event.preventDefault();
+      const audio = audioRef.current;
+      if (!audio) return;
+      if (audio.paused) {
+        audio.play().catch(() => {});
+      } else {
+        audio.pause();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const loadSource = useCallback(
     async (source: TrackSource) => {
       setIsAnalyzing(true);
@@ -86,8 +109,9 @@ export function WaveformPreview() {
         if (!analyzed) {
           throw new Error("Unable to analyze waveform (analyzer unavailable).");
         }
-        setWaveform(analyzed);
-        setDuration(analyzed.durationSeconds);
+        setWaveform(analyzed.waveform);
+        setDuration(analyzed.waveform.durationSeconds);
+        setBpm(analyzed.bpm ?? null);
         setCurrentTime(0);
 
         const audio = audioRef.current;
@@ -188,23 +212,42 @@ export function WaveformPreview() {
               {isPlaying ? "❚❚" : "▶"}
             </button>
 
-            <div className="flex flex-col text-sm text-slate-300">
-              <span className="font-semibold text-white">{formattedTime}</span>
-              <span className="text-xs text-slate-400">Click waveform to jump</span>
-            </div>
+          <div className="flex flex-col text-sm text-slate-300">
+            <span className="font-semibold text-white">{formattedTime}</span>
+            <span className="text-xs text-slate-400">Click waveform to jump</span>
+          </div>
 
-            <div className="ml-auto flex items-center gap-2 text-xs uppercase tracking-wide text-slate-300">
+            <div className="ml-auto flex items-center gap-3 text-xs uppercase tracking-wide text-slate-300">
+              <div className="flex items-center gap-2 text-[11px] font-semibold">
+                <span className="text-slate-400">Zoom</span>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={16}
+                  step={0.1}
+                  value={zoom}
+                  onChange={(e) => setZoom(parseFloat(e.target.value))}
+                  className="accent-indigo-300 h-2 w-28 cursor-pointer appearance-none rounded-full bg-slate-800"
+                />
+                <span className="text-slate-200">{zoom.toFixed(1)}×</span>
+              </div>
               <Pill subtle>{catalog.length ? `${catalog.length} tracks` : "Loading…"}</Pill>
               <Pill subtle>{isPlaying ? "Playing" : "Paused"}</Pill>
+              <Pill subtle>{bpm ? `${bpm} BPM` : "BPM analyzing"}</Pill>
             </div>
           </div>
 
-          <div className="relative overflow-hidden rounded-2xl border border-slate-800/60 bg-slate-950/80 p-3 shadow-[0_30px_60px_rgba(0,0,0,0.45)]">
-            <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/3 via-transparent to-transparent" aria-hidden />
-
+          <div className="space-y-4">
+            {/* Overview pane */}
+            <PaneLabel>Overview</PaneLabel>
             <WaveformCanvas
+              compact
+              mirror={false}
+              fixedCenter={false}
               waveform={waveform}
               duration={duration}
+              bpm={bpm ?? selectedTrack?.bpm ?? null}
+              zoom={1}
               isPlaying={isPlaying}
               baseCurrentTime={currentTime}
               liveTimeGetter={liveTime}
@@ -217,11 +260,26 @@ export function WaveformPreview() {
               }}
             />
 
-            {!hasWaveform && (
-              <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-slate-950/95 text-slate-300">
-                {isAnalyzing ? "Analyzing waveform…" : catalog.length ? "Select a track to inspect the waveform" : "Loading catalog…"}
-              </div>
-            )}
+            {/* Zoomed detail pane */}
+            <PaneLabel>Detail (8× default)</PaneLabel>
+            <WaveformCanvas
+              mirror
+              fixedCenter
+              waveform={waveform}
+              duration={duration}
+              bpm={bpm ?? selectedTrack?.bpm ?? null}
+              zoom={zoom}
+              isPlaying={isPlaying}
+              baseCurrentTime={currentTime}
+              liveTimeGetter={liveTime}
+              onSeek={(position) => {
+                const audio = audioRef.current;
+                if (!audio || !duration) return;
+                const nextTime = clamp(position * duration, 0, duration);
+                audio.currentTime = nextTime;
+                setCurrentTime(nextTime);
+              }}
+            />
           </div>
 
           <audio
@@ -258,6 +316,10 @@ function Pill({ children, subtle = false }: { children: React.ReactNode; subtle?
   );
 }
 
+function PaneLabel({ children }: { children: React.ReactNode }) {
+  return <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{children}</div>;
+}
+
 type PulseDotProps = { label: string };
 
 function PulseDot({ label }: PulseDotProps) {
@@ -275,6 +337,8 @@ function PulseDot({ label }: PulseDotProps) {
 type WaveformCanvasProps = {
   waveform: WaveformData | null;
   duration: number;
+  bpm?: number | null;
+  zoom: number;
   isPlaying: boolean;
   baseCurrentTime: number;
   liveTimeGetter?: () => number;
@@ -284,16 +348,25 @@ type WaveformCanvasProps = {
 function WaveformCanvas({
   waveform,
   duration,
+  bpm,
+  zoom,
+  mirror = true,
+  fixedCenter = false,
+  compact = false,
   isPlaying,
   baseCurrentTime,
   liveTimeGetter,
   onSeek,
-}: WaveformCanvasProps) {
+}: WaveformCanvasProps & { mirror?: boolean; fixedCenter?: boolean; compact?: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
+  const dragging = useRef(false);
+  const dragStartX = useRef<number | null>(null);
+  const dragStartTime = useRef<number | null>(null);
+  const smoothedCenter = useRef<number | null>(null);
 
-  const [size, setSize] = useState({ width: 960, height: 220 });
+  const [size, setSize] = useState({ width: 960, height: compact ? 110 : 320 });
 
   // Track resize to keep canvas crisp.
   useEffect(() => {
@@ -303,16 +376,17 @@ function WaveformCanvas({
       const entry = entries[0];
       if (!entry) return;
       const { width, height } = entry.contentRect;
+      const targetHeight = compact ? Math.max(96, Math.floor(height)) : Math.max(180, Math.floor(height));
       setSize({
         width: Math.max(320, Math.floor(width)),
-        height: Math.max(160, Math.floor(height)),
+        height: targetHeight,
       });
     });
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
 
-  // Render static waveform onto base canvas whenever data or size changes.
+  // Render waveform with rAF for smooth motion tied to actual playback time.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !waveform) return;
@@ -326,68 +400,130 @@ function WaveformCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, size.width, size.height);
 
     const midY = size.height / 2;
     const bars = waveform.bars;
-    const pixelsPerBar = bars.length / size.width;
 
-    for (let x = 0; x < size.width; x += 1) {
-      const barStart = Math.floor(x * pixelsPerBar);
-      const barEnd = Math.min(
-        bars.length,
-        Math.max(barStart + 1, Math.ceil((x + 1) * pixelsPerBar)),
+    let rafId: number;
+    const render = () => {
+      const liveTime = liveTimeGetter?.() ?? baseCurrentTime;
+
+      // Snap immediately: no smoothing glide even while playing
+      smoothedCenter.current = liveTime;
+
+      const centerForView = smoothedCenter.current ?? liveTime;
+
+      const { startSec, endSec, spanSec } = computeViewWindow(
+        duration,
+        centerForView,
+        zoom,
       );
 
-      let amp = 0;
-      let r = 0;
-      let g = 0;
-      let b = 0;
-      let count = 0;
+      ctx.clearRect(0, 0, size.width, size.height);
 
-      for (let i = barStart; i < barEnd; i += 1) {
-        const bar = bars[i];
-        amp += bar.amplitude;
-        r += bar.color.r;
-        g += bar.color.g;
-        b += bar.color.b;
-        count += 1;
+      const amplitudeScale = compact ? 0.6 : 0.48;
+
+      for (let x = 0; x < size.width; x += 1) {
+        const ratio = x / size.width;
+        const time = startSec + ratio * spanSec;
+        const norm = clamp(time / Math.max(duration, 0.001), 0, 1);
+        const exactIndex = norm * (bars.length - 1);
+        const i0 = Math.floor(exactIndex);
+        const i1 = Math.min(bars.length - 1, i0 + 1);
+        const t = exactIndex - i0;
+        const b0 = bars[i0];
+        const b1 = bars[i1];
+        const amp = lerp(b0.amplitude, b1.amplitude, t);
+        const r = lerp(b0.color.r, b1.color.r, t);
+        const g = lerp(b0.color.g, b1.color.g, t);
+        const b = lerp(b0.color.b, b1.color.b, t);
+
+        const height = amp * (size.height * amplitudeScale);
+        const barColor = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
+
+        ctx.fillStyle = barColor;
+        if (mirror) {
+          const topY = midY - height;
+          ctx.fillRect(x, topY, 1, height * 2);
+        } else {
+          const baseY = size.height;
+          const topY = baseY - height;
+          ctx.fillRect(x, topY, 1, height);
+        }
       }
 
-      if (count === 0) continue;
-      amp /= count;
-      r /= count;
-      g /= count;
-      b /= count;
-
-      const height = amp * (size.height * 0.48);
-      const topY = midY - height;
-      const barColor = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
-
-      ctx.fillStyle = barColor;
-      ctx.fillRect(x, topY, 1, height * 2);
-    }
-
-    // soft glow overlay
-    ctx.fillStyle = "rgba(255,255,255,0.08)";
-    ctx.fillRect(0, midY - 0.5, size.width, 1);
-
-    // second markers to mirror original preview
-    if (duration > 0) {
-      const pixelsPerSecond = size.width / Math.max(duration, 0.001);
-      const totalSeconds = Math.ceil(duration);
-      for (let s = 0; s <= totalSeconds; s += 1) {
-        const x = s * pixelsPerSecond;
-        if (x > size.width) break;
-        ctx.strokeStyle = s % 10 === 0 ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)";
-        ctx.lineWidth = s % 10 === 0 ? 1.5 : 1;
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, size.height);
-        ctx.stroke();
+      // soft glow overlay
+      if (mirror) {
+        ctx.fillStyle = "rgba(255,255,255,0.08)";
+        ctx.fillRect(0, midY - 0.5, size.width, 1);
+      } else {
+        const gridY = size.height * 0.68; // lower grid for compact overview only
+        ctx.fillStyle = "rgba(255,255,255,0.06)";
+        ctx.fillRect(0, gridY, size.width, 1);
       }
-    }
-  }, [waveform, size.width, size.height, duration]);
+
+      // Beat grid (preferred) or seconds grid fallback using the current view window span
+      const pixelsPerSecond = size.width / Math.max(spanSec || 0.001, 0.001);
+      const offsetSec = startSec; // grid scrolls with window start
+      if (bpm && bpm > 0 && Number.isFinite(bpm) && duration > 0) {
+        const secondsPerBeat = 60 / bpm;
+        const firstBeatIndex = Math.floor(offsetSec / secondsPerBeat);
+        const firstBeatTime = firstBeatIndex * secondsPerBeat;
+        const beats = Math.ceil(spanSec / secondsPerBeat) + 2;
+        for (let i = 0; i <= beats; i += 1) {
+          const tBeat = firstBeatTime + i * secondsPerBeat;
+          const x = (tBeat - offsetSec) * pixelsPerSecond;
+          if (x < -2 || x > size.width + 2) continue;
+          const isBar = (firstBeatIndex + i) % 4 === 0;
+          ctx.strokeStyle = isBar ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.10)";
+          ctx.lineWidth = isBar ? 1.5 : 1;
+          ctx.beginPath();
+          ctx.moveTo(x + 0.5, 0);
+          ctx.lineTo(x + 0.5, size.height);
+          ctx.stroke();
+        }
+      } else if (duration > 0) {
+        const firstSecond = Math.floor(offsetSec);
+        const totalSeconds = Math.ceil(spanSec) + 2;
+        for (let s = 0; s <= totalSeconds; s += 1) {
+          const tSec = firstSecond + s;
+          const x = (tSec - offsetSec) * pixelsPerSecond;
+          if (x < -2 || x > size.width + 2) continue;
+          const isTen = tSec % 10 === 0;
+          ctx.strokeStyle = isTen ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)";
+          ctx.lineWidth = isTen ? 1.5 : 1;
+          ctx.beginPath();
+          ctx.moveTo(x + 0.5, 0);
+          ctx.lineTo(x + 0.5, size.height);
+          ctx.stroke();
+        }
+      }
+
+      rafId = requestAnimationFrame(render);
+    };
+
+    render();
+    return () => cancelAnimationFrame(rafId);
+  }, [waveform, size.width, size.height, duration, bpm, zoom, mirror, fixedCenter, liveTimeGetter, baseCurrentTime]);
+
+  // Smooth pan/scroll when zoomed in.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handleWheel = (event: WheelEvent) => {
+      if (zoom <= 1 || duration <= 0 || !fixedCenter) return;
+      event.preventDefault();
+      const liveTime = liveTimeGetter?.() ?? baseCurrentTime;
+      const { spanSec } = computeViewWindow(duration, liveTime, zoom);
+      const dominantDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      const secondsPerPixel = spanSec / Math.max(size.width, 1);
+      const deltaSeconds = dominantDelta * secondsPerPixel * 0.5; // tune feel
+      const nextTime = clamp(liveTime + deltaSeconds, 0, duration);
+      onSeek(nextTime / Math.max(duration, 0.001));
+    };
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel as any);
+  }, [zoom, duration, baseCurrentTime, liveTimeGetter, size.width, onSeek]);
 
   // Render playhead overlay separate for smooth updates.
   useEffect(() => {
@@ -407,8 +543,11 @@ function WaveformCanvas({
     let rafId: number;
     const render = () => {
       const liveTime = liveTimeGetter?.() ?? baseCurrentTime;
-      const ratio = duration > 0 ? liveTime / duration : 0;
-      const x = Math.max(0, Math.min(size.width, ratio * size.width));
+
+      const { startSec, endSec, spanSec } = computeViewWindow(duration, liveTime, zoom);
+      const clampedTime = Math.max(startSec, Math.min(endSec, liveTime));
+      const ratio = spanSec > 0 ? (clampedTime - startSec) / spanSec : 0;
+      const x = fixedCenter && zoom > 1.01 ? size.width / 2 : Math.max(0, Math.min(size.width, ratio * size.width));
 
       ctx.clearRect(0, 0, size.width, size.height);
       ctx.beginPath();
@@ -429,15 +568,49 @@ function WaveformCanvas({
   }, [duration, isPlaying, liveTimeGetter, baseCurrentTime, size.width, size.height]);
 
   return (
-    <div ref={containerRef} className="relative h-[320px] w-full">
+    <div
+      ref={containerRef}
+      className={`relative w-full ${compact ? "h-[120px]" : "h-[320px]"} select-none`}
+    >
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 rounded-lg bg-slate-950"
+        className="absolute inset-0 rounded-lg bg-slate-950 cursor-pointer"
+        onMouseDown={(event) => {
+          if (!duration) return;
+          if (!(fixedCenter && zoom > 1)) return; // overview stays click-only
+          dragging.current = true;
+          dragStartX.current = event.clientX;
+          dragStartTime.current = liveTimeGetter?.() ?? baseCurrentTime;
+          event.currentTarget.style.cursor = "grabbing";
+        }}
+        onMouseMove={(event) => {
+          if (!duration) return;
+          if (dragging.current && fixedCenter && zoom > 1) {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const deltaPx = event.clientX - (dragStartX.current ?? event.clientX);
+            const { spanSec } = computeViewWindow(duration, dragStartTime.current ?? baseCurrentTime, zoom);
+            const secondsPerPixel = spanSec / Math.max(rect.width, 1);
+            const nextTime = clamp((dragStartTime.current ?? baseCurrentTime) + deltaPx * secondsPerPixel, 0, duration);
+            onSeek(nextTime / Math.max(duration, 0.001));
+          }
+        }}
+        onMouseUp={() => {
+          dragging.current = false;
+        }}
+        onMouseLeave={() => {
+          dragging.current = false;
+        }}
         onClick={(event) => {
           if (!duration) return;
           const rect = event.currentTarget.getBoundingClientRect();
-          const ratio = (event.clientX - rect.left) / rect.width;
-          onSeek(ratio);
+          const ratio = clamp((event.clientX - rect.left) / Math.max(rect.width, 1), 0, 1);
+          if (fixedCenter && zoom > 1) {
+            const { startSec, spanSec } = computeViewWindow(duration, baseCurrentTime, zoom);
+            const nextTime = startSec + ratio * spanSec;
+            onSeek(nextTime / Math.max(duration, 0.001));
+          } else {
+            onSeek(ratio);
+          }
         }}
       />
       <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 rounded-lg" />
@@ -453,10 +626,6 @@ function formatClock(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
-function clamp(value: number, min = 0, max = 1) {
-  return Math.min(max, Math.max(min, value));
-}
-
 function buildR2SourceFromCatalog(record?: CatalogRecord): TrackSource | null {
   if (!record || !record.path) return null;
   const label = record.name ?? record.path;
@@ -466,6 +635,7 @@ function buildR2SourceFromCatalog(record?: CatalogRecord): TrackSource | null {
     label,
     url,
     originalName: path,
+    bpm: record.bpm ?? null,
     fetchArrayBuffer: async () => {
       const response = await fetch(url);
       if (!response.ok) throw new Error(`audio request failed (${response.status})`);
@@ -474,11 +644,37 @@ function buildR2SourceFromCatalog(record?: CatalogRecord): TrackSource | null {
   };
 }
 
+// Compute the currently visible time window given zoom and a center time.
+function computeViewWindow(duration: number, centerTime: number, zoom: number) {
+  const safeDuration = Math.max(duration, 0.001);
+  const spanSec = Math.min(safeDuration, safeDuration / Math.max(zoom, 0.1));
+  const half = spanSec / 2;
+  let startSec = centerTime - half;
+  let endSec = centerTime + half;
+  // Allow the window to extend past edges; sampling clamps time to valid range to keep playhead centered visually.
+  if (spanSec >= safeDuration) {
+    startSec = 0;
+    endSec = safeDuration;
+  }
+  return { startSec, endSec, spanSec };
+}
+
+// Clamp utility kept local for computeViewWindow and scrolling math
+function clamp(value: number, min = 0, max = 1) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}
+
 /**
  * Ask the Cloudflare Worker + analyzer container to compute a waveform for a track
  * that lives in R2. Returns null if unavailable or the request fails.
  */
-async function analyzeWithWorker(source: TrackSource): Promise<WaveformData | null> {
+type AnalyzeResponse = { waveform: WaveformData; bpm?: number | null };
+
+async function analyzeWithWorker(source: TrackSource): Promise<AnalyzeResponse | null> {
   const apiUrl = `${buildApiUrl("/api/analyze")}`;
 
   // The worker expects either a trackId or path that matches the R2 object key.
@@ -497,9 +693,9 @@ async function analyzeWithWorker(source: TrackSource): Promise<WaveformData | nu
       return null;
     }
 
-    const payload = (await response.json()) as { waveform?: WaveformData };
+    const payload = (await response.json()) as { waveform?: WaveformData; bpm?: number | null };
     if (payload?.waveform && Array.isArray(payload.waveform.bars)) {
-      return payload.waveform;
+      return { waveform: payload.waveform, bpm: payload.bpm ?? null };
     }
   } catch (error) {
     console.warn("worker analyze threw", error);
