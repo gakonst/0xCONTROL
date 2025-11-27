@@ -809,6 +809,9 @@ async function saveWaveformToDb(
 
   const payload = JSON.stringify(analysis.waveform);
   const durationSeconds = analysis.waveform.durationSeconds ?? null;
+  const roundedDuration = Number.isFinite(durationSeconds ?? NaN)
+    ? Math.max(0, Math.round(durationSeconds ?? 0))
+    : null;
   const sampleRate = analysis.waveform.sampleRate ?? null;
 
   await db
@@ -838,7 +841,7 @@ async function saveWaveformToDb(
         WHERE track_id = ?
       `,
     )
-    .bind(roundedBpm, durationSeconds, trackId)
+    .bind(roundedBpm, roundedDuration, trackId)
     .run();
 }
 

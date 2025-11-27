@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { LibraryHeader } from "@/components/library-header";
 import { OverviewCanvas } from "@/components/waveform-canvas";
 import { useWaveform } from "@/hooks/use-waveform";
-import { parseDurationToSeconds } from "@/lib/time";
+import { formatSecondsToClock, parseDurationToSeconds } from "@/lib/time";
 
 export type TrackSortField = "title" | "bpm" | "key" | null;
 export type TrackSortDirection = "asc" | "desc";
@@ -354,12 +354,10 @@ function TrackListRow({
   const { data: waveformAnalysis } = useWaveform(track.id);
   const waveform = waveformAnalysis?.waveform ?? null;
   const isRowActive = playback?.trackId === track.id;
-  const durationSeconds =
-    waveform?.durationSeconds ??
-    playback?.durationSeconds ??
-    parseDurationToSeconds(track.duration);
+  const durationSeconds = waveform?.durationSeconds;
   const safeDurationSeconds =
     durationSeconds && durationSeconds > 0 ? durationSeconds : 1;
+  const displayDuration = durationSeconds;
   const displayBpm =
     waveformAnalysis?.bpm !== undefined && waveformAnalysis?.bpm !== null
       ? Math.round(waveformAnalysis.bpm)
@@ -548,7 +546,9 @@ function TrackListRow({
             <span className="inline-flex w-8 justify-center rounded-none border border-white/60 bg-white/80 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-tight text-black/80 md:text-xs">
               {track.key}
             </span>
-            <span className="text-[0.7rem] md:text-xs">{track.duration}</span>
+            <span className="text-[0.7rem] md:text-xs">
+              {formatSecondsToClock(displayDuration)}
+            </span>
           </div>
         </div>
 

@@ -531,6 +531,8 @@ function App() {
     ? annotations[currentTrack.id]
     : undefined;
   const { data: currentWaveformAnalysis } = useWaveform(currentTrack?.id);
+  const preferredDurationSeconds = currentWaveformAnalysis?.waveform
+    ?.durationSeconds;
 
   const goToTrackByOffset = useCallback(
     (offset: number) => {
@@ -1038,7 +1040,7 @@ function App() {
                 trackId: currentTrack?.id ?? "",
                 isPlaying,
                 elapsedSeconds,
-                durationSeconds,
+                durationSeconds: preferredDurationSeconds ?? undefined,
                 liveTimeGetter: () =>
                   audioRef.current?.currentTime ?? elapsedSeconds,
               }}
@@ -1060,8 +1062,12 @@ function App() {
             isPlaying={isPlaying}
             isBuffering={isBuffering}
             elapsedSeconds={elapsedSeconds}
-            durationSeconds={durationSeconds ?? undefined}
+            durationSeconds={preferredDurationSeconds ?? undefined}
             bpmOverride={currentWaveformAnalysis?.bpm ?? null}
+            waveform={currentWaveformAnalysis?.waveform ?? null}
+            liveTimeGetter={() =>
+              audioRef.current?.currentTime ?? elapsedSeconds
+            }
             onTogglePlay={handleTogglePlay}
             onSkipNext={goToNextTrack}
             onSkipPrevious={goToPreviousTrack}
@@ -1076,7 +1082,7 @@ function App() {
           isPlaying={isPlaying}
           isBuffering={isBuffering}
           elapsedSeconds={elapsedSeconds}
-          durationSeconds={durationSeconds ?? undefined}
+          durationSeconds={preferredDurationSeconds ?? undefined}
           waveform={currentWaveformAnalysis?.waveform ?? null}
           waveformBpm={currentWaveformAnalysis?.bpm ?? null}
           beatOffsetSeconds={currentWaveformAnalysis?.beatOffsetSeconds ?? null}
