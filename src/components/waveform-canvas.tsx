@@ -187,30 +187,54 @@ function WaveformCanvas({
 
       if (!isOverview) {
         const pixelsPerSecond = size.width / Math.max(spanSec || 0.001, 0.001);
-        const offsetSec = startSec;
-        const gridTop = 0;
-        const gridBottom = size.height;
+          const offsetSec = startSec;
+          const gridTop = 0;
+          const gridBottom = size.height;
 
-        if (bpm && bpm > 0 && Number.isFinite(bpm) && duration > 0) {
-          const secondsPerBeat = 60 / bpm;
-          const beatOffset = beatOffsetSeconds ?? 0;
-          const viewStartRelative = offsetSec - beatOffset;
-          const firstBeatIndex = Math.floor(viewStartRelative / secondsPerBeat);
-          const firstBeatTime = firstBeatIndex * secondsPerBeat + beatOffset;
-          const beats = Math.ceil(spanSec / secondsPerBeat) + 2;
-          for (let i = 0; i <= beats; i += 1) {
-            const tBeat = firstBeatTime + i * secondsPerBeat;
-            const x = (tBeat - offsetSec) * pixelsPerSecond;
-            if (x < -2 || x > size.width + 2) continue;
+          if (bpm && bpm > 0 && Number.isFinite(bpm) && duration > 0) {
+            const secondsPerBeat = 60 / bpm;
+            const beatOffset = beatOffsetSeconds ?? 0;
+            const viewStartRelative = offsetSec - beatOffset;
+            const epsilon = 1e-6; // keep floating-point error from shifting the grid over time
+            const firstBeatIndex = Math.floor(
+              (viewStartRelative + epsilon) / secondsPerBeat,
+            );
+            const firstBeatTime = firstBeatIndex * secondsPerBeat + beatOffset;
+            const beats = Math.ceil(spanSec / secondsPerBeat) + 2;
+            for (let i = 0; i <= beats; i += 1) {
+              const tBeat = firstBeatTime + i * secondsPerBeat;
+              const x = Math.round((tBeat - offsetSec) * pixelsPerSecond);
+              if (x < -2 || x > size.width + 2) continue;
             const isBar = (firstBeatIndex + i) % 4 === 0;
             ctx.strokeStyle = isBar
-              ? "rgba(255,255,255,0.22)"
-              : "rgba(255,255,255,0.10)";
-            ctx.lineWidth = isBar ? 1.5 : 1;
+              ? "rgba(255,255,255,0.28)"
+              : "rgba(255,255,255,0.18)";
+            ctx.lineWidth = isBar ? 1.7 : 1.2;
             ctx.beginPath();
             ctx.moveTo(x + 0.5, gridTop);
             ctx.lineTo(x + 0.5, gridBottom);
             ctx.stroke();
+
+            // Mark the downbeat (1st beat of each 4-beat bar) with a small red arrow.
+            if (isBar) {
+              const arrowSize = 8;
+              const half = arrowSize / 2;
+              ctx.fillStyle = "#ef4444";
+              // Top arrow (faces down): tip lower than base
+              ctx.beginPath();
+              ctx.moveTo(x + 0.5, gridTop + arrowSize); // tip
+              ctx.lineTo(x - half, gridTop);
+              ctx.lineTo(x + half, gridTop);
+              ctx.closePath();
+              ctx.fill();
+              // Bottom arrow (faces up): tip higher than base
+              ctx.beginPath();
+              ctx.moveTo(x + 0.5, gridBottom - arrowSize); // tip
+              ctx.lineTo(x - half, gridBottom);
+              ctx.lineTo(x + half, gridBottom);
+              ctx.closePath();
+              ctx.fill();
+            }
           }
         } else if (duration > 0) {
           const firstSecond = Math.floor(offsetSec);

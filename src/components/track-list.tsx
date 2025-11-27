@@ -507,7 +507,7 @@ function TrackListRow({
         }}
       >
         <div className="flex items-center gap-2 text-xs font-medium tracking-tight text-muted-foreground">
-          <div className="h-10 w-28 flex-shrink-0 overflow-hidden border border-white/10 bg-white/5">
+          <div className="h-9 w-24 flex-shrink-0 overflow-hidden border border-white/10 bg-white/5 md:h-10 md:w-32">
             {waveform ? (
               <OverviewCanvas
                 waveform={waveform}
@@ -519,8 +519,8 @@ function TrackListRow({
                 liveTimeGetter={undefined}
                 showPlayhead={false}
                 onSeek={() => {}}
-                height={40}
-                className="pointer-events-none relative h-10 w-full rounded-none"
+                height={36}
+                className="pointer-events-none relative h-9 w-full rounded-none md:h-10"
                 rounded={false}
               />
             ) : (

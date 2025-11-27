@@ -1,4 +1,4 @@
-import { type PointerEvent, useMemo, useRef } from "react";
+import { type PointerEvent, useMemo, useRef, useState } from "react";
 
 import {
   ChevronDown,
@@ -7,6 +7,8 @@ import {
   Play,
   SkipBack,
   SkipForward,
+  Minus,
+  Plus,
 } from "lucide-react";
 
 import { DetailCanvas, OverviewCanvas } from "@/components/waveform-canvas";
@@ -47,6 +49,7 @@ export function FullScreenPlayer({
   onClose,
   onSeek,
 }: FullScreenPlayerProps) {
+  const [detailZoom, setDetailZoom] = useState(8);
   const safeDuration =
     durationSeconds ??
     waveform?.durationSeconds ??
@@ -145,20 +148,20 @@ export function FullScreenPlayer({
       </header>
 
       <div className="flex flex-1 flex-col items-center gap-6 px-6 pb-10 pt-8 text-center">
-        <div className="w-full max-w-5xl overflow-hidden rounded-2xl border border-white/20 bg-black/25 shadow-[0_25px_80px_rgba(0,0,0,0.65)] backdrop-blur">
+        <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-white/20 bg-black/25 shadow-[0_25px_80px_rgba(0,0,0,0.65)] backdrop-blur px-2 py-3 md:px-3">
           {waveform ? (
             <DetailCanvas
               waveform={waveform}
               duration={safeDuration}
               bpm={waveformBpm ?? track.bpm}
               beatOffsetSeconds={beatOffsetSeconds}
-              zoom={8}
+              zoom={detailZoom}
               isPlaying={isPlaying}
               baseCurrentTime={elapsedSeconds}
               liveTimeGetter={liveTimeGetter}
               onSeek={(ratio) => onSeek(ratio * safeDuration)}
-              height={280}
-              className="relative h-[280px] w-full"
+              height={220}
+              className="relative h-[220px] w-full md:h-[260px]"
             />
           ) : (
             <div className="flex h-[280px] w-full items-center justify-center bg-gradient-to-b from-white/5 to-white/0">
@@ -189,9 +192,32 @@ export function FullScreenPlayer({
           </p>
         </div>
 
-        <div className="w-full max-w-5xl space-y-2">
+        <div className="w-full max-w-4xl space-y-2">
           <div className="flex items-center justify-between text-xs text-white/70">
             <span>{formatTime(elapsedSeconds)}</span>
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-white/70">
+              <button
+                type="button"
+                onClick={() =>
+                  setDetailZoom((z: number) => Math.max(1, +(z - 1).toFixed(1)))
+                }
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-white/10 transition hover:bg-white/20"
+                aria-label="Zoom out"
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+              <span className="min-w-[52px] text-center text-white">{detailZoom.toFixed(1)}×</span>
+              <button
+                type="button"
+                onClick={() =>
+                  setDetailZoom((z: number) => Math.min(32, +(z + 1).toFixed(1)))
+                }
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-white/10 transition hover:bg-white/20"
+                aria-label="Zoom in"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
             <span>{formatTime(safeDuration)}</span>
           </div>
           <div className="rounded-xl border border-white/15 bg-black/30 p-2">
@@ -205,8 +231,8 @@ export function FullScreenPlayer({
                 baseCurrentTime={elapsedSeconds}
                 liveTimeGetter={liveTimeGetter}
                 onSeek={(ratio) => onSeek(ratio * safeDuration)}
-                height={96}
-                className="relative h-[96px] w-full"
+                height={72}
+                className="relative h-[72px] w-full md:h-[88px]"
               />
             ) : (
               <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-white/20">
