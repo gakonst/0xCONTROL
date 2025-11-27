@@ -826,7 +826,6 @@ async function saveWaveformToDb(
   const roundedBpm = analysis.bpm !== null && Number.isFinite(analysis.bpm)
     ? Math.round(analysis.bpm)
     : null;
-  const durationSeconds = analysis.waveform.durationSeconds ?? null;
 
   await db
     .prepare(

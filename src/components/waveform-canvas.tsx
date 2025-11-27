@@ -24,6 +24,7 @@ export type WaveformCanvasProps = {
   height?: number;
   className?: string;
   rounded?: boolean;
+  showPlayhead?: boolean;
 };
 
 export function OverviewCanvas(
@@ -70,6 +71,7 @@ function WaveformCanvas({
   height,
   className,
   rounded = true,
+  showPlayhead = true,
 }: WaveformCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -290,17 +292,20 @@ function WaveformCanvas({
         : Math.max(0, Math.min(size.width, ratio * size.width));
 
       ctx.clearRect(0, 0, size.width, size.height);
-      ctx.beginPath();
-      ctx.moveTo(x + 0.5, 0);
-      ctx.lineTo(x + 0.5, size.height);
-      ctx.strokeStyle = isPlaying ? "rgba(255,255,255,0.95)" : "#ef4444";
-      ctx.lineWidth = 2;
-      ctx.shadowColor = isPlaying
-        ? "rgba(255,255,255,0.35)"
-        : "rgba(239,68,68,0.4)";
-      ctx.shadowBlur = 6;
-      ctx.stroke();
-      ctx.shadowBlur = 0;
+
+      if (showPlayhead) {
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, size.height);
+        ctx.strokeStyle = isPlaying ? "rgba(255,255,255,0.95)" : "#ef4444";
+        ctx.lineWidth = 2;
+        ctx.shadowColor = isPlaying
+          ? "rgba(255,255,255,0.35)"
+          : "rgba(239,68,68,0.4)";
+        ctx.shadowBlur = 6;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
 
       rafId = requestAnimationFrame(render);
     };

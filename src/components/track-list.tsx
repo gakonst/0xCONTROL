@@ -517,6 +517,7 @@ function TrackListRow({
                 isPlaying={false}
                 baseCurrentTime={0}
                 liveTimeGetter={undefined}
+                showPlayhead={false}
                 onSeek={() => {}}
                 height={40}
                 className="pointer-events-none relative h-10 w-full rounded-none"
