@@ -514,9 +514,9 @@ function TrackListRow({
                 duration={safeDurationSeconds}
                 bpm={waveformAnalysis?.bpm ?? track.bpm}
                 beatOffsetSeconds={waveformAnalysis?.beatOffsetSeconds}
-                isPlaying={isRowPlaying}
-                baseCurrentTime={baseCurrentTime}
-                liveTimeGetter={liveTimeGetter}
+                isPlaying={false}
+                baseCurrentTime={0}
+                liveTimeGetter={undefined}
                 onSeek={() => {}}
                 height={40}
                 className="pointer-events-none relative h-10 w-full rounded-none"
