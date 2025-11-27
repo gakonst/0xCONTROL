@@ -9,6 +9,9 @@ import {
 import { Track } from "@/data/tracks";
 import { cn } from "@/lib/utils";
 import { LibraryHeader } from "@/components/library-header";
+import { OverviewCanvas } from "@/components/waveform-canvas";
+import { useWaveform } from "@/hooks/use-waveform";
+import { parseDurationToSeconds } from "@/lib/time";
 
 export type TrackSortField = "title" | "bpm" | "key" | null;
 export type TrackSortDirection = "asc" | "desc";
@@ -29,6 +32,13 @@ type TrackListProps = {
   onQuickAddToPlaylist?: QuickActionHandler;
   quickRemoveLabel?: string;
   onQuickRemoveFromPlaylist?: QuickActionHandler;
+  playback?: {
+    trackId: string;
+    isPlaying: boolean;
+    elapsedSeconds: number;
+    durationSeconds?: number | null;
+    liveTimeGetter?: () => number;
+  };
 };
 
 type TrackListHeaderConfig = {
@@ -74,6 +84,7 @@ export function TrackList({
   onQuickAddToPlaylist,
   quickRemoveLabel,
   onQuickRemoveFromPlaylist,
+  playback,
 }: TrackListProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [uncontrolledSortField, setUncontrolledSortField] =
@@ -292,6 +303,7 @@ export function TrackList({
             }
             quickAddLabel={quickAddLabel}
             quickRemoveLabel={quickRemoveLabel}
+            playback={playback}
           />
         ))}
       </div>
@@ -307,6 +319,13 @@ type TrackListRowProps = {
   onQuickRemove?: QuickActionHandler;
   quickAddLabel?: string;
   quickRemoveLabel?: string;
+  playback?: {
+    trackId: string;
+    isPlaying: boolean;
+    elapsedSeconds: number;
+    durationSeconds?: number | null;
+    liveTimeGetter?: () => number;
+  };
 };
 
 function TrackListRow({
@@ -317,6 +336,7 @@ function TrackListRow({
   onQuickRemove,
   quickAddLabel,
   quickRemoveLabel,
+  playback,
 }: TrackListRowProps) {
   const [dragOffset, setDragOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -331,6 +351,18 @@ function TrackListRow({
     track.title.charAt(0).toUpperCase() ||
     track.artist.charAt(0).toUpperCase() ||
     "?";
+  const { data: waveformAnalysis } = useWaveform(track.id);
+  const waveform = waveformAnalysis?.waveform ?? null;
+  const isRowActive = playback?.trackId === track.id;
+  const durationSeconds =
+    waveform?.durationSeconds ??
+    playback?.durationSeconds ??
+    parseDurationToSeconds(track.duration);
+  const safeDurationSeconds =
+    durationSeconds && durationSeconds > 0 ? durationSeconds : 1;
+  const liveTimeGetter = isRowActive ? playback?.liveTimeGetter : undefined;
+  const baseCurrentTime = isRowActive ? playback?.elapsedSeconds ?? 0 : 0;
+  const isRowPlaying = isRowActive ? playback?.isPlaying ?? false : false;
 
   const clampOffset = (value: number) => {
     return Math.max(Math.min(value, maxOffset), -maxOffset);
@@ -471,15 +503,23 @@ function TrackListRow({
         }}
       >
         <div className="flex items-center gap-2 text-xs font-medium tracking-tight text-muted-foreground">
-          <div className="h-8 w-8 flex-shrink-0 overflow-hidden border border-white/10 bg-white/5">
-            {track.cover ? (
-              <img
-                src={track.cover}
-                alt={track.title}
-                className="h-full w-full object-cover"
+          <div className="h-10 w-28 flex-shrink-0 overflow-hidden border border-white/10 bg-white/5">
+            {waveform ? (
+              <OverviewCanvas
+                waveform={waveform}
+                duration={safeDurationSeconds}
+                bpm={track.bpm}
+                beatOffsetSeconds={waveformAnalysis?.beatOffsetSeconds}
+                isPlaying={isRowPlaying}
+                baseCurrentTime={baseCurrentTime}
+                liveTimeGetter={liveTimeGetter}
+                onSeek={() => {}}
+                height={40}
+                className="pointer-events-none relative h-10 w-full rounded-none"
+                rounded={false}
               />
             ) : (
-              <div className="flex h-full w-full items-center justify-center text-[0.65rem] font-semibold uppercase text-white/70">
+              <div className="flex h-full w-full items-center justify-center text-[0.7rem] font-semibold uppercase text-white/70">
                 {fallbackInitial}
               </div>
             )}

@@ -1,4 +1,4 @@
-import { type MouseEvent, type PointerEvent, useMemo, useRef } from "react";
+import { type PointerEvent, useMemo, useRef } from "react";
 
 import {
   ChevronDown,
@@ -9,7 +9,10 @@ import {
   SkipForward,
 } from "lucide-react";
 
+import { DetailCanvas, OverviewCanvas } from "@/components/waveform-canvas";
 import { Track } from "@/data/tracks";
+import { parseDurationToSeconds } from "@/lib/time";
+import type { WaveformData } from "@/lib/waveform";
 
 type FullScreenPlayerProps = {
   track: Track;
@@ -17,6 +20,10 @@ type FullScreenPlayerProps = {
   isBuffering: boolean;
   elapsedSeconds: number;
   durationSeconds?: number | null;
+  waveform?: WaveformData | null;
+  waveformBpm?: number | null;
+  beatOffsetSeconds?: number | null;
+  liveTimeGetter?: () => number;
   onTogglePlay: () => void;
   onSkipNext: () => void;
   onSkipPrevious: () => void;
@@ -30,26 +37,20 @@ export function FullScreenPlayer({
   isBuffering,
   elapsedSeconds,
   durationSeconds,
+  waveform,
+  waveformBpm,
+  beatOffsetSeconds,
+  liveTimeGetter,
   onTogglePlay,
   onSkipNext,
   onSkipPrevious,
   onClose,
   onSeek,
 }: FullScreenPlayerProps) {
-  const parseDurationToSeconds = (duration?: string) => {
-    if (!duration) return 0;
-    const parts = duration.split(":").map((value) => Number(value) || 0);
-    if (parts.length === 2) {
-      const [minutes, seconds] = parts;
-      return minutes * 60 + seconds;
-    }
-    return 0;
-  };
-
   const safeDuration =
-    durationSeconds ?? parseDurationToSeconds(track.duration);
-  const progress =
-    safeDuration > 0 ? Math.min(elapsedSeconds / safeDuration, 1) : 0;
+    durationSeconds ??
+    waveform?.durationSeconds ??
+    parseDurationToSeconds(track.duration);
 
   const formatTime = useMemo(
     () => (value: number) => {
@@ -63,21 +64,10 @@ export function FullScreenPlayer({
 
   const swipeStartRef = useRef<number | null>(null);
   const swipePointerRef = useRef<number | null>(null);
-  const progressBarRef = useRef<HTMLDivElement | null>(null);
 
   const resetSwipe = () => {
     swipeStartRef.current = null;
     swipePointerRef.current = null;
-  };
-
-  const handleSeekClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (!progressBarRef.current || safeDuration <= 0) return;
-    const rect = progressBarRef.current.getBoundingClientRect();
-    const ratio = Math.min(
-      Math.max((event.clientX - rect.left) / rect.width, 0),
-      1,
-    );
-    onSeek(ratio * safeDuration);
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -151,19 +141,37 @@ export function FullScreenPlayer({
       </header>
 
       <div className="flex flex-1 flex-col items-center gap-6 px-6 pb-10 pt-8 text-center">
-        <div className="relative flex h-64 w-64 items-center justify-center overflow-hidden rounded-2xl border border-white/20 bg-black/20 shadow-[0_25px_80px_rgba(0,0,0,0.65)] md:h-80 md:w-80">
-          {track.cover ? (
-            <img
-              src={track.cover}
-              alt={track.title}
-              className="h-full w-full object-cover"
+        <div className="w-full max-w-5xl overflow-hidden rounded-2xl border border-white/20 bg-black/25 shadow-[0_25px_80px_rgba(0,0,0,0.65)] backdrop-blur">
+          {waveform ? (
+            <DetailCanvas
+              waveform={waveform}
+              duration={safeDuration}
+              bpm={waveformBpm ?? track.bpm}
+              beatOffsetSeconds={beatOffsetSeconds}
+              zoom={8}
+              isPlaying={isPlaying}
+              baseCurrentTime={elapsedSeconds}
+              liveTimeGetter={liveTimeGetter}
+              onSeek={(ratio) => onSeek(ratio * safeDuration)}
+              height={280}
+              className="relative h-[280px] w-full"
             />
           ) : (
-            <span className="text-5xl font-semibold uppercase text-white/60">
-              {track.title.charAt(0).toUpperCase() ||
-                track.artist.charAt(0).toUpperCase() ||
-                "?"}
-            </span>
+            <div className="flex h-[280px] w-full items-center justify-center bg-gradient-to-b from-white/5 to-white/0">
+              {track.cover ? (
+                <img
+                  src={track.cover}
+                  alt={track.title}
+                  className="h-40 w-40 rounded-xl object-cover shadow-2xl"
+                />
+              ) : (
+                <span className="text-5xl font-semibold uppercase text-white/60">
+                  {track.title.charAt(0).toUpperCase() ||
+                    track.artist.charAt(0).toUpperCase() ||
+                    "?"}
+                </span>
+              )}
+            </div>
           )}
         </div>
 
@@ -177,20 +185,39 @@ export function FullScreenPlayer({
           </p>
         </div>
 
-        <div className="w-full max-w-xl">
+        <div className="w-full max-w-5xl space-y-2">
           <div className="flex items-center justify-between text-xs text-white/70">
             <span>{formatTime(elapsedSeconds)}</span>
             <span>{formatTime(safeDuration)}</span>
           </div>
-          <div
-            ref={progressBarRef}
-            className="mt-2 h-1.5 w-full cursor-pointer overflow-hidden rounded bg-white/20"
-            onClick={handleSeekClick}
-          >
-            <div
-              className="h-full bg-white"
-              style={{ width: `${progress * 100}%` }}
-            />
+          <div className="rounded-xl border border-white/15 bg-black/30 p-2">
+            {waveform ? (
+              <OverviewCanvas
+                waveform={waveform}
+                duration={safeDuration}
+                bpm={waveformBpm ?? track.bpm}
+                beatOffsetSeconds={beatOffsetSeconds}
+                isPlaying={isPlaying}
+                baseCurrentTime={elapsedSeconds}
+                liveTimeGetter={liveTimeGetter}
+                onSeek={(ratio) => onSeek(ratio * safeDuration)}
+                height={96}
+                className="relative h-[96px] w-full"
+              />
+            ) : (
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-white/20">
+                <div
+                  className="h-full bg-white"
+                  style={{
+                    width: `${
+                      safeDuration > 0
+                        ? Math.min((elapsedSeconds / safeDuration) * 100, 100)
+                        : 0
+                    }%`,
+                  }}
+                />
+              </div>
+            )}
           </div>
         </div>
 
