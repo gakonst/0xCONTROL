@@ -335,7 +335,7 @@ export function PlaylistBrowser({
         onClearSearch={() => setSearchQuery("")}
         extraControls={extraControls}
       />
-      <div className="flex-1 overflow-auto pb-6">
+      <div className="flex-1 overflow-auto pb-48 pt-1 md:pb-12">
         {isEmpty && (
           <div className="flex h-full flex-col items-center justify-center gap-2 border border-dashed border-white/10 bg-black/30 text-center text-sm text-muted-foreground">
             <p>No playlists yet.</p>
