@@ -9,6 +9,9 @@ import {
 import { Track } from "@/data/tracks";
 import { cn } from "@/lib/utils";
 import { LibraryHeader } from "@/components/library-header";
+import { OverviewCanvas } from "@/components/waveform-canvas";
+import { useWaveform } from "@/hooks/use-waveform";
+import { formatSecondsToClock, parseDurationToSeconds } from "@/lib/time";
 
 export type TrackSortField = "title" | "bpm" | "key" | null;
 export type TrackSortDirection = "asc" | "desc";
@@ -29,6 +32,13 @@ type TrackListProps = {
   onQuickAddToPlaylist?: QuickActionHandler;
   quickRemoveLabel?: string;
   onQuickRemoveFromPlaylist?: QuickActionHandler;
+  playback?: {
+    trackId: string;
+    isPlaying: boolean;
+    elapsedSeconds: number;
+    durationSeconds?: number | null;
+    liveTimeGetter?: () => number;
+  };
 };
 
 type TrackListHeaderConfig = {
@@ -74,6 +84,7 @@ export function TrackList({
   onQuickAddToPlaylist,
   quickRemoveLabel,
   onQuickRemoveFromPlaylist,
+  playback,
 }: TrackListProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [uncontrolledSortField, setUncontrolledSortField] =
@@ -292,6 +303,7 @@ export function TrackList({
             }
             quickAddLabel={quickAddLabel}
             quickRemoveLabel={quickRemoveLabel}
+            playback={playback}
           />
         ))}
       </div>
@@ -307,6 +319,13 @@ type TrackListRowProps = {
   onQuickRemove?: QuickActionHandler;
   quickAddLabel?: string;
   quickRemoveLabel?: string;
+  playback?: {
+    trackId: string;
+    isPlaying: boolean;
+    elapsedSeconds: number;
+    durationSeconds?: number | null;
+    liveTimeGetter?: () => number;
+  };
 };
 
 function TrackListRow({
@@ -317,6 +336,7 @@ function TrackListRow({
   onQuickRemove,
   quickAddLabel,
   quickRemoveLabel,
+  playback,
 }: TrackListRowProps) {
   const [dragOffset, setDragOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -331,6 +351,20 @@ function TrackListRow({
     track.title.charAt(0).toUpperCase() ||
     track.artist.charAt(0).toUpperCase() ||
     "?";
+  const { data: waveformAnalysis } = useWaveform(track.id);
+  const waveform = waveformAnalysis?.waveform ?? null;
+  const isRowActive = playback?.trackId === track.id;
+  const durationSeconds = waveform?.durationSeconds;
+  const safeDurationSeconds =
+    durationSeconds && durationSeconds > 0 ? durationSeconds : 1;
+  const displayDuration = durationSeconds;
+  const displayBpm =
+    waveformAnalysis?.bpm !== undefined && waveformAnalysis?.bpm !== null
+      ? Math.round(waveformAnalysis.bpm)
+      : track.bpm;
+  const liveTimeGetter = isRowActive ? playback?.liveTimeGetter : undefined;
+  const baseCurrentTime = isRowActive ? playback?.elapsedSeconds ?? 0 : 0;
+  const isRowPlaying = isRowActive ? playback?.isPlaying ?? false : false;
 
   const clampOffset = (value: number) => {
     return Math.max(Math.min(value, maxOffset), -maxOffset);
@@ -471,15 +505,24 @@ function TrackListRow({
         }}
       >
         <div className="flex items-center gap-2 text-xs font-medium tracking-tight text-muted-foreground">
-          <div className="h-8 w-8 flex-shrink-0 overflow-hidden border border-white/10 bg-white/5">
-            {track.cover ? (
-              <img
-                src={track.cover}
-                alt={track.title}
-                className="h-full w-full object-cover"
+          <div className="h-9 w-24 flex-shrink-0 overflow-hidden border border-white/10 bg-white/5 md:h-10 md:w-32">
+            {waveform ? (
+              <OverviewCanvas
+                waveform={waveform}
+                duration={safeDurationSeconds}
+                bpm={waveformAnalysis?.bpm ?? track.bpm}
+                beatOffsetSeconds={waveformAnalysis?.beatOffsetSeconds}
+                isPlaying={false}
+                baseCurrentTime={0}
+                liveTimeGetter={undefined}
+                showPlayhead={false}
+                onSeek={() => {}}
+                height={36}
+                className="pointer-events-none relative h-9 w-full rounded-none md:h-10"
+                rounded={false}
               />
             ) : (
-              <div className="flex h-full w-full items-center justify-center text-[0.65rem] font-semibold uppercase text-white/70">
+              <div className="flex h-full w-full items-center justify-center text-[0.7rem] font-semibold uppercase text-white/70">
                 {fallbackInitial}
               </div>
             )}
@@ -497,13 +540,15 @@ function TrackListRow({
 
         <div className="ml-auto flex w-[110px] flex-shrink-0 flex-col items-end text-right md:w-[120px]">
           <span className="truncate text-sm font-semibold tracking-tight text-foreground md:text-base">
-            {track.bpm} BPM
+            {displayBpm} BPM
           </span>
           <div className="mt-0.5 flex items-center justify-end gap-1.5 text-xs text-muted-foreground md:text-sm">
             <span className="inline-flex w-8 justify-center rounded-none border border-white/60 bg-white/80 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-tight text-black/80 md:text-xs">
               {track.key}
             </span>
-            <span className="text-[0.7rem] md:text-xs">{track.duration}</span>
+            <span className="text-[0.7rem] md:text-xs">
+              {formatSecondsToClock(displayDuration)}
+            </span>
           </div>
         </div>
 

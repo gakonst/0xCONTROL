@@ -34,6 +34,8 @@ const SHOULD_USE_LOCAL_TRACKS =
 const LOCAL_TRACK_MANIFEST_PATH =
   (import.meta.env.VITE_LOCAL_TRACK_MANIFEST_PATH as string | undefined) ??
   "/tracks/manifest.json";
+const R2_DEV_SERVER_URL =
+  (import.meta.env.VITE_R2_DEV_SERVER_URL as string | undefined)?.replace(/\/$/, "");
 
 type LocalTrackManifestEntry = {
   fileName?: string;
@@ -169,6 +171,9 @@ function buildCatalogUrl(): string {
 
 export function getTrackUrl(trackId: string): string {
   const encodedId = encodeURIComponent(trackId);
+  if (R2_DEV_SERVER_URL) {
+    return `${R2_DEV_SERVER_URL}/${encodedId}`;
+  }
   if (SHOULD_USE_LOCAL_TRACKS) {
     return `/tracks/${encodedId}`;
   }

@@ -11,6 +11,17 @@ CREATE TABLE IF NOT EXISTS track_metadata (
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS waveform_analysis (
+  track_id TEXT PRIMARY KEY,
+  waveform_json TEXT NOT NULL,
+  bpm INTEGER,
+  beat_offset_seconds REAL,
+  duration_seconds REAL NOT NULL,
+  sample_rate REAL,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS playlists (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,

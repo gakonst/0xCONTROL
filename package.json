@@ -11,12 +11,15 @@
     "deploy": "bun run build && bunx wrangler deploy"
   },
   "dependencies": {
+    "@cloudflare/containers": "^0.0.30",
+    "@ffmpeg/ffmpeg": "^0.12.15",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-slot": "^1.2.4",
     "@tanstack/react-query": "^5.51.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "fft.js": "^4.0.4",
     "hono": "^4.10.6",
     "lucide-react": "^0.553.0",
     "react": "^18.2.0",
@@ -27,6 +30,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240512.0",
+    "@types/node": "^24.10.1",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@vitejs/plugin-react-swc": "^3.5.0",

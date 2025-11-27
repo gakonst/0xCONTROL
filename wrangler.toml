@@ -1,6 +1,10 @@
 name = "zero-control-dapp"
 main = "worker/index.ts"
-compatibility_date = "2024-06-15"
+compatibility_date = "2025-11-22"
+
+[env.preview]
+# Separate preview script name so Durable Objects/D1/R2 use isolated namespaces
+name = "zero-control-dapp-preview"
 
 [assets]
 directory = "./dist"
@@ -18,3 +22,17 @@ database_name = "zero-control-tracks"
 
 [vars]
 SONG_PASSWORD = "true"
+
+[[containers]]
+class_name = "AnalyzerContainer"
+image = "./containers/analyzer/Dockerfile"
+max_instances = 2
+instance_type = "standard-2"
+
+[[durable_objects.bindings]]
+name = "ANALYZER_CONTAINER"
+class_name = "AnalyzerContainer"
+
+[[migrations]]
+tag = "v2-analyzer-container"
+new_sqlite_classes = ["AnalyzerContainer"]

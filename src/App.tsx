@@ -34,6 +34,7 @@ import {
 } from "@/data/playlists";
 import { fetchCatalogTracks, getTrackUrl, type Track } from "@/data/tracks";
 import { useMediaSession } from "@/hooks/use-media-session";
+import { useWaveform } from "@/hooks/use-waveform";
 import type { TrackAnnotation } from "@/types/annotations";
 import type { Playlist } from "@/types/playlists";
 
@@ -529,6 +530,9 @@ function App() {
   const currentAnnotation = currentTrack
     ? annotations[currentTrack.id]
     : undefined;
+  const { data: currentWaveformAnalysis } = useWaveform(currentTrack?.id);
+  const preferredDurationSeconds = currentWaveformAnalysis?.waveform
+    ?.durationSeconds;
 
   const goToTrackByOffset = useCallback(
     (offset: number) => {
@@ -1032,6 +1036,14 @@ function App() {
                       removeTrackFromPlaylist(activePlaylist.id, trackId)
                   : undefined
               }
+              playback={{
+                trackId: currentTrack?.id ?? "",
+                isPlaying,
+                elapsedSeconds,
+                durationSeconds: preferredDurationSeconds ?? undefined,
+                liveTimeGetter: () =>
+                  audioRef.current?.currentTime ?? elapsedSeconds,
+              }}
             />
           )}
         </div>
@@ -1050,7 +1062,12 @@ function App() {
             isPlaying={isPlaying}
             isBuffering={isBuffering}
             elapsedSeconds={elapsedSeconds}
-            durationSeconds={durationSeconds ?? undefined}
+            durationSeconds={preferredDurationSeconds ?? undefined}
+            bpmOverride={currentWaveformAnalysis?.bpm ?? null}
+            waveform={currentWaveformAnalysis?.waveform ?? null}
+            liveTimeGetter={() =>
+              audioRef.current?.currentTime ?? elapsedSeconds
+            }
             onTogglePlay={handleTogglePlay}
             onSkipNext={goToNextTrack}
             onSkipPrevious={goToPreviousTrack}
@@ -1065,7 +1082,13 @@ function App() {
           isPlaying={isPlaying}
           isBuffering={isBuffering}
           elapsedSeconds={elapsedSeconds}
-          durationSeconds={durationSeconds ?? undefined}
+          durationSeconds={preferredDurationSeconds ?? undefined}
+          waveform={currentWaveformAnalysis?.waveform ?? null}
+          waveformBpm={currentWaveformAnalysis?.bpm ?? null}
+          beatOffsetSeconds={currentWaveformAnalysis?.beatOffsetSeconds ?? null}
+          liveTimeGetter={() =>
+            audioRef.current?.currentTime ?? elapsedSeconds
+          }
           onTogglePlay={handleTogglePlay}
           onSkipNext={goToNextTrack}
           onSkipPrevious={goToPreviousTrack}

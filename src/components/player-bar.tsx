@@ -4,6 +4,8 @@ import { Loader2, Pause, Play } from "lucide-react";
 
 import { Track } from "@/data/tracks";
 import { cn } from "@/lib/utils";
+import { OverviewCanvas } from "@/components/waveform-canvas";
+import type { WaveformData } from "@/lib/waveform";
 
 type PlayerBarProps = {
   track: Track;
@@ -11,6 +13,9 @@ type PlayerBarProps = {
   isBuffering: boolean;
   elapsedSeconds: number;
   durationSeconds?: number | null;
+  bpmOverride?: number | null;
+  waveform?: WaveformData | null;
+  liveTimeGetter?: () => number;
   onTogglePlay: () => void;
   onSkipNext: () => void;
   onSkipPrevious: () => void;
@@ -24,26 +29,22 @@ export function PlayerBar({
   isBuffering,
   elapsedSeconds,
   durationSeconds,
+  bpmOverride,
+  waveform,
+  liveTimeGetter,
   onTogglePlay,
   onSkipNext,
   onSkipPrevious,
   className,
   onOpenFullScreen,
 }: PlayerBarProps) {
-  const parseDurationToSeconds = (duration?: string) => {
-    if (!duration) return 0;
-    const parts = duration.split(":").map((value) => Number(value) || 0);
-    if (parts.length === 2) {
-      const [minutes, seconds] = parts;
-      return minutes * 60 + seconds;
-    }
-    return 0;
-  };
-
-  const safeDuration =
-    durationSeconds ?? parseDurationToSeconds(track.duration);
+  const safeDuration = durationSeconds ?? waveform?.durationSeconds ?? 0;
   const progress =
     safeDuration > 0 ? Math.min(elapsedSeconds / safeDuration, 1) : 0;
+  const displayBpm =
+    bpmOverride !== null && bpmOverride !== undefined
+      ? Math.round(bpmOverride)
+      : track.bpm;
   const swipeStartRef = useRef<number | null>(null);
   const swipePointerRef = useRef<number | null>(null);
   const ignoreOpenRef = useRef(false);
@@ -116,36 +117,45 @@ export function PlayerBar({
   return (
     <footer className={cn("w-full", className)}>
       <div
-        className="relative bg-[rgba(18,18,18,0.98)] px-4 py-3 text-white shadow-[0_-15px_60px_rgba(0,0,0,0.55)]"
+        className="relative overflow-hidden bg-[rgba(2,2,6,0.98)] px-4 py-3 text-white shadow-[0_-15px_60px_rgba(0,0,0,0.65)]"
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
       >
-        <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 flex-none items-center justify-center overflow-hidden border border-white/10 bg-white/5 text-sm font-semibold uppercase text-white/70">
-            {track.cover ? (
-              <img
-                src={track.cover}
-                alt={track.title}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              track.title.charAt(0).toUpperCase() ||
-              track.artist.charAt(0).toUpperCase() ||
-              "?"
-            )}
+        {waveform && (
+          <div className="pointer-events-none absolute inset-0 z-0 opacity-80">
+            <OverviewCanvas
+              waveform={waveform}
+              duration={safeDuration}
+              bpm={displayBpm}
+              isPlaying={isPlaying}
+              baseCurrentTime={elapsedSeconds}
+              liveTimeGetter={liveTimeGetter}
+              beatOffsetSeconds={null}
+              onSeek={() => {}}
+              height={64}
+              className="absolute inset-0"
+              rounded={false}
+              showPlayhead
+            />
+            <div className="absolute inset-0 z-0 bg-gradient-to-r from-black/85 via-black/70 to-black/85" />
           </div>
+        )}
+
+        <div className="relative z-20 flex items-center gap-3">
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-white">
+            <p className="truncate text-sm font-semibold text-white drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]">
               {track.title}
             </p>
-            <p className="truncate text-xs text-white/60">{track.artist}</p>
+            <p className="truncate text-xs text-white/75 drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)]">
+              {track.artist}
+            </p>
           </div>
-          <div className="flex flex-col items-end text-right text-[0.65rem] uppercase tracking-[0.1rem] text-white/60">
-            <span className="text-sm font-semibold text-white">
-              {track.bpm} BPM
+          <div className="flex flex-col items-end text-right text-[0.65rem] uppercase tracking-[0.1rem] text-white/80 drop-shadow-[0_1px_4px_rgba(0,0,0,0.9)]">
+            <span className="text-sm font-semibold text-white drop-shadow-[0_1px_4px_rgba(0,0,0,1)]">
+              {displayBpm} BPM
             </span>
-            <span className="mt-1 inline-flex min-w-[3rem] justify-center border border-white/40 px-2 py-0.5 text-xs font-semibold text-white">
+            <span className="mt-1 inline-flex min-w-[3rem] justify-center border border-white/70 bg-white/10 px-2 py-0.5 text-xs font-semibold text-white drop-shadow-[0_1px_4px_rgba(0,0,0,1)]">
               {track.key}
             </span>
           </div>
@@ -154,25 +164,25 @@ export function PlayerBar({
             onClick={handlePlayClick}
             disabled={isBuffering}
             data-player-play-control="play"
-            className="flex h-11 w-11 flex-none items-center justify-center bg-white text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-black/60"
+            className="relative z-30 flex h-12 w-12 flex-none items-center justify-center bg-white text-black shadow-[0_12px_32px_rgba(0,0,0,0.65)] ring-2 ring-white transition hover:bg-white/90 hover:shadow-[0_14px_40px_rgba(0,0,0,0.7)] focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:bg-white/70 disabled:text-black/70"
           >
             {isBuffering ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-5 w-5 animate-spin drop-shadow-[0_1px_3px_rgba(0,0,0,0.35)]" />
             ) : isPlaying ? (
-              <Pause className="h-4 w-4" />
+              <Pause className="h-5 w-5 drop-shadow-[0_1px_3px_rgba(0,0,0,0.35)]" />
             ) : (
-              <Play className="h-4 w-4" />
+              <Play className="h-5 w-5 drop-shadow-[0_1px_3px_rgba(0,0,0,0.35)]" />
             )}
           </button>
         </div>
 
-        <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+        <div className="absolute bottom-0 left-0 right-0 z-10 h-1 bg-white/20">
           <span
             className="block h-full bg-white"
             style={{ width: `${progress * 100}%` }}
           />
         </div>
-        <span className="pointer-events-none absolute inset-0 bg-gradient-to-r from-white/0 via-white/0 to-white/10" />
+        <span className="pointer-events-none absolute inset-0 z-5 bg-gradient-to-r from-white/0 via-white/0 to-white/10" />
       </div>
     </footer>
   );

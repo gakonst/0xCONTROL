@@ -1,5 +1,8 @@
 .wrangler/
 tracks/
+cloudflare-r2-dev-server/
+.env.local
+
 
 # Logs
 logs

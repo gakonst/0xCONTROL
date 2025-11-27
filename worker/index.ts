@@ -1,9 +1,12 @@
 /// <reference types="@cloudflare/workers-types" />
 
-import type { D1Database } from "@cloudflare/workers-types";
+import { Container, getContainer, type ContainerNamespace } from "@cloudflare/containers";
+import type { D1Database, ExecutionContext } from "@cloudflare/workers-types";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { MiddlewareHandler } from "hono";
+import type { PresetKey } from "../src/lib/waveform";
+import type { WaveformAnalysis, WaveformData } from "../src/lib/waveform";
 
 type AnnotationColor = "red" | "blue" | "pink" | "cyan";
 
@@ -32,6 +35,16 @@ interface TrackMetadataRow {
   musical_key: string | null;
   annotation_color: AnnotationColor | null;
   annotation_note: string | null;
+}
+
+interface WaveformRow {
+  track_id: string;
+  waveform_json: string;
+  bpm: number | null;
+  beat_offset_seconds: number | null;
+  duration_seconds: number;
+  sample_rate: number | null;
+  updated_at: string;
 }
 
 type TrackAnnotationUpdatePayload = {
@@ -101,11 +114,24 @@ type PlaylistCreatePayload = {
   isFavorite?: boolean;
 };
 
+type AnalyzeRequestPayload = {
+  trackId?: string;
+  path?: string;
+  resolution?: number;
+  preset?: PresetKey;
+};
+
+export class AnalyzerContainer extends Container {
+  defaultPort = 3000;
+  sleepAfter = "10m";
+}
+
 export interface Env {
   ASSETS: Fetcher;
   SONG_PASSWORD: string;
   TRACKS_BUCKET: R2Bucket;
   TRACKS_DB: D1Database;
+  ANALYZER_CONTAINER: ContainerNamespace;
 }
 
 const INDEX_PATH = "index.html";
@@ -138,17 +164,100 @@ async function authenticateRequest(_c: Parameters<typeof requireAuth>[0]) {
 }
 
 app.get("/api/tracks", requireAuth, async (c) => {
-  const catalog = await buildCatalogResponse(c.env);
+  const catalog = await buildCatalogResponse(c.env, c.executionCtx);
   return c.json(catalog, 200, {
     "Cache-Control": "no-store",
   });
 });
 
 app.get("/api/catalog", requireAuth, async (c) => {
-  const catalog = await buildCatalogResponse(c.env);
+  const catalog = await buildCatalogResponse(c.env, c.executionCtx);
   return c.json(catalog, 200, {
     "Cache-Control": "no-store",
   });
+});
+
+app.post("/api/analyze", requireAuth, async (c) => {
+  let payload: AnalyzeRequestPayload | null = null;
+  try {
+    payload = (await c.req.json()) as AnalyzeRequestPayload;
+  } catch {
+    return c.text("Invalid JSON payload", 400);
+  }
+
+  const rawTrackId = typeof payload?.path === "string" ? payload.path : payload?.trackId;
+  const candidateKeys = buildTrackKeyCandidates(rawTrackId);
+  if (candidateKeys.length === 0) {
+    return c.text("trackId or path is required", 400);
+  }
+
+  const trackId = candidateKeys[0];
+
+  // First try to serve cached analysis from D1.
+  const cached = await loadWaveformFromDb(c.env.TRACKS_DB, trackId);
+  if (cached) {
+    return c.json(cached, 200, { "Cache-Control": "no-store" });
+  }
+
+  let object: R2ObjectBody | null = null;
+  for (const candidateKey of candidateKeys) {
+    object = await c.env.TRACKS_BUCKET.get(candidateKey);
+    if (object) break;
+  }
+
+  if (!object) {
+    return c.text("Track not found", 404);
+  }
+
+  try {
+    const analyzer = getContainer(c.env.ANALYZER_CONTAINER, "waveform");
+    await analyzer.startAndWaitForPorts();
+
+    const analyzeUrl = new URL("http://container/analyze");
+    if (typeof payload?.resolution === "number" && Number.isInteger(payload.resolution)) {
+      analyzeUrl.searchParams.set("resolution", String(payload.resolution));
+    }
+    const presetKey = payload?.preset;
+    if (presetKey) {
+      analyzeUrl.searchParams.set("preset", presetKey);
+    }
+
+    const analyzeResponse = await analyzer.fetch(
+      new Request(analyzeUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            object.httpMetadata?.contentType ?? inferContentTypeFromKey(object.key),
+        },
+        body: await object.arrayBuffer(),
+      }),
+    );
+
+    if (!analyzeResponse.ok) {
+      const text = await analyzeResponse.text();
+      console.error("Analyzer container failed", text);
+      return c.text("Analyzer failed", 502);
+    }
+
+    const body = await analyzeResponse.json<Record<string, unknown>>();
+    const waveform = body.waveform as WaveformData | undefined;
+    const bpm = (body.bpm as number | null | undefined) ?? null;
+    const beatOffsetSeconds =
+      (body.beatOffsetSeconds as number | null | undefined) ?? null;
+
+    if (waveform && Array.isArray(waveform.bars)) {
+      await saveWaveformToDb(c.env.TRACKS_DB, trackId, {
+        waveform,
+        bpm,
+        beatOffsetSeconds,
+      });
+    }
+
+    return c.json(body, 200, { "Cache-Control": "no-store" });
+  } catch (error) {
+    console.error("Failed to analyze track", error);
+    return c.text("Analysis failed", 500);
+  }
 });
 
 app.get("/api/playlists", requireAuth, async (c) => {
@@ -504,17 +613,30 @@ app.get("/api/tracks/:trackId", requireAuth, trackStreamHandler);
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const honoResponse = await app.fetch(request, env, ctx);
-    if (honoResponse.status !== 404) {
+    // Only fall back to static assets for GET/HEAD that truly 404 from the API router.
+    if (honoResponse.status !== 404 || (request.method !== "GET" && request.method !== "HEAD")) {
       return honoResponse;
     }
 
-    return serveAssets(request, env);
+    // Rebuild the request without a consumed body to satisfy asset handler.
+    const assetRequest = new Request(request.url, request);
+    return serveAssets(assetRequest, env);
   },
 } satisfies ExportedHandler<Env>;
 
-async function buildCatalogResponse(env: Env): Promise<CatalogResponse> {
+async function buildCatalogResponse(
+  env: Env,
+  executionCtx?: ExecutionContext,
+): Promise<CatalogResponse> {
   try {
     const tracks = await loadCatalogFromDb(env.TRACKS_DB);
+
+    // Kick off analysis for any tracks missing cached waveforms.
+    const ensureWaveforms = analyzeMissingTracks(env, tracks);
+    if (executionCtx) {
+      executionCtx.waitUntil(ensureWaveforms);
+    }
+
     return { tracks };
   } catch (error) {
     console.error("Failed to load catalog from D1", error);
@@ -619,6 +741,183 @@ async function loadPlaylistById(
 ): Promise<PlaylistRecord | null> {
   const playlists = await loadPlaylistsFromDb(db, playlistId);
   return playlists[0] ?? null;
+}
+
+async function loadWaveformFromDb(
+  db: D1Database,
+  trackId: string,
+): Promise<WaveformAnalysis | null> {
+  const statement = `
+    SELECT
+      track_id,
+      waveform_json,
+      bpm,
+      beat_offset_seconds,
+      duration_seconds,
+      sample_rate,
+      updated_at
+    FROM waveform_analysis
+    WHERE track_id = ?
+    LIMIT 1
+  `;
+
+  const { results } = await db.prepare(statement).bind(trackId).all<WaveformRow>();
+  const row = results?.[0];
+  if (!row) return null;
+
+  try {
+    const waveform = JSON.parse(row.waveform_json) as WaveformData;
+    if (!waveform || !Array.isArray(waveform.bars)) return null;
+    return {
+      waveform,
+      bpm: row.bpm ?? null,
+      beatOffsetSeconds: row.beat_offset_seconds ?? null,
+    };
+  } catch (error) {
+    console.warn("Failed to parse cached waveform JSON", error);
+    return null;
+  }
+}
+
+async function saveWaveformToDb(
+  db: D1Database,
+  trackId: string,
+  analysis: {
+    waveform: WaveformData;
+    bpm: number | null;
+    beatOffsetSeconds: number | null;
+  },
+) {
+  const statement = `
+    INSERT INTO waveform_analysis (
+      track_id,
+      waveform_json,
+      bpm,
+      beat_offset_seconds,
+      duration_seconds,
+      sample_rate,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(track_id) DO UPDATE SET
+      waveform_json = excluded.waveform_json,
+      bpm = excluded.bpm,
+      beat_offset_seconds = excluded.beat_offset_seconds,
+      duration_seconds = excluded.duration_seconds,
+      sample_rate = excluded.sample_rate,
+      updated_at = CURRENT_TIMESTAMP
+  `;
+
+  const payload = JSON.stringify(analysis.waveform);
+  const durationSeconds = analysis.waveform.durationSeconds ?? null;
+  const roundedDuration = Number.isFinite(durationSeconds ?? NaN)
+    ? Math.max(0, Math.round(durationSeconds ?? 0))
+    : null;
+  const sampleRate = analysis.waveform.sampleRate ?? null;
+
+  await db
+    .prepare(statement)
+    .bind(
+      trackId,
+      payload,
+      analysis.bpm,
+      analysis.beatOffsetSeconds,
+      durationSeconds,
+      sampleRate,
+    )
+    .run();
+
+  const roundedBpm = analysis.bpm !== null && Number.isFinite(analysis.bpm)
+    ? Math.round(analysis.bpm)
+    : null;
+
+  await db
+    .prepare(
+      `
+        UPDATE track_metadata
+        SET
+          bpm = COALESCE(?, bpm),
+          duration_seconds = COALESCE(?, duration_seconds),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE track_id = ?
+      `,
+    )
+    .bind(roundedBpm, roundedDuration, trackId)
+    .run();
+}
+
+async function findTracksMissingWaveform(db: D1Database): Promise<string[]> {
+  const statement = `
+    SELECT track_id
+    FROM track_metadata
+    WHERE track_id NOT IN (SELECT track_id FROM waveform_analysis)
+  `;
+
+  const { results } = await db.prepare(statement).all<{ track_id: string }>();
+  return (results ?? []).map((row) => row.track_id);
+}
+
+async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
+  if (!tracks.length) return;
+
+  const missing = await findTracksMissingWaveform(env.TRACKS_DB);
+  if (!missing.length) return;
+
+  for (const trackId of missing) {
+    const record = tracks.find((t) => t.id === trackId);
+    const keyCandidates = buildTrackKeyCandidates(record?.path ?? trackId);
+    let object: R2ObjectBody | null = null;
+    for (const candidateKey of keyCandidates) {
+      object = await env.TRACKS_BUCKET.get(candidateKey);
+      if (object) break;
+    }
+    if (!object) {
+      console.warn("Missing R2 object for unanalyzed track", trackId);
+      continue;
+    }
+
+    try {
+      const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
+      await analyzer.startAndWaitForPorts();
+
+      const analyzeUrl = new URL("http://container/analyze");
+      const analyzeResponse = await analyzer.fetch(
+        new Request(analyzeUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              object.httpMetadata?.contentType ??
+              inferContentTypeFromKey(object.key),
+          },
+          body: await object.arrayBuffer(),
+        }),
+      );
+
+      if (!analyzeResponse.ok) {
+        console.warn(
+          "Analyzer failed while backfilling",
+          trackId,
+          analyzeResponse.status,
+        );
+        continue;
+      }
+
+      const body = await analyzeResponse.json<Record<string, unknown>>();
+      const waveform = body.waveform as WaveformData | undefined;
+      const bpm = (body.bpm as number | null | undefined) ?? null;
+      const beatOffsetSeconds =
+        (body.beatOffsetSeconds as number | null | undefined) ?? null;
+
+      if (waveform && Array.isArray(waveform.bars)) {
+        await saveWaveformToDb(env.TRACKS_DB, trackId, {
+          waveform,
+          bpm,
+          beatOffsetSeconds,
+        });
+      }
+    } catch (error) {
+      console.warn("Backfill analysis failed", trackId, error);
+    }
+  }
 }
 
 function mapPlaylistRow(
@@ -731,6 +1030,8 @@ function buildTrackKeyCandidates(rawTrackId?: string): string[] {
   }
 
   const decoded = safeDecodeURIComponent(rawTrackId);
+  const encoded = encodeURIComponent(decoded ?? rawTrackId);
+  const encodedUri = encodeURI(decoded ?? rawTrackId);
   const keys = new Set<string>();
 
   if (decoded) {
@@ -739,6 +1040,17 @@ function buildTrackKeyCandidates(rawTrackId?: string): string[] {
 
   if (!decoded || decoded !== rawTrackId) {
     keys.add(rawTrackId);
+  }
+
+  keys.add(encoded);
+  keys.add(encodedUri);
+
+  // Common layout: objects live under a "tracks/" prefix in R2. Try both forms.
+  const candidates = Array.from(keys);
+  for (const key of candidates) {
+    if (!key.startsWith("tracks/")) {
+      keys.add(`tracks/${key}`);
+    }
   }
 
   return Array.from(keys);
