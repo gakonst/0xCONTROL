@@ -36,6 +36,27 @@ const LOCAL_TRACK_MANIFEST_PATH =
   "/tracks/manifest.json";
 const R2_DEV_SERVER_URL =
   (import.meta.env.VITE_R2_DEV_SERVER_URL as string | undefined)?.replace(/\/$/, "");
+const isBrowser = typeof window !== "undefined";
+
+function isLocalHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
+function shouldUseR2DevServer(): boolean {
+  if (!R2_DEV_SERVER_URL || !isBrowser) return false;
+
+  try {
+    const devUrl = new URL(R2_DEV_SERVER_URL);
+    const devIsLocal = isLocalHostname(devUrl.hostname);
+    const pageIsLocal = isLocalHostname(window.location.hostname);
+
+    // Only use the localhost dev server when we're also on localhost.
+    return devIsLocal && pageIsLocal;
+  } catch (err) {
+    console.warn("Unable to parse R2 dev server URL", err);
+    return false;
+  }
+}
 
 type LocalTrackManifestEntry = {
   fileName?: string;
@@ -171,7 +192,7 @@ function buildCatalogUrl(): string {
 
 export function getTrackUrl(trackId: string): string {
   const encodedId = encodeURIComponent(trackId);
-  if (R2_DEV_SERVER_URL) {
+  if (shouldUseR2DevServer()) {
     return `${R2_DEV_SERVER_URL}/${encodedId}`;
   }
   if (SHOULD_USE_LOCAL_TRACKS) {

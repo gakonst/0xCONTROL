@@ -19,4 +19,6 @@ bun run build
 bun run deploy
 ```
 
+For production builds, Vite will load `.env.production` to set the API base URL. Keep `.env.local` for local development only so the deployed bundle points at the hosted worker instead of `localhost`.
+
 `bun run deploy` simply wraps the build followed by `bunx wrangler deploy`, so you can continue to use Wrangler directly if you prefer (`bunx wrangler deploy --help`).
