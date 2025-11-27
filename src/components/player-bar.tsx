@@ -11,6 +11,7 @@ type PlayerBarProps = {
   isBuffering: boolean;
   elapsedSeconds: number;
   durationSeconds?: number | null;
+  bpmOverride?: number | null;
   onTogglePlay: () => void;
   onSkipNext: () => void;
   onSkipPrevious: () => void;
@@ -24,6 +25,7 @@ export function PlayerBar({
   isBuffering,
   elapsedSeconds,
   durationSeconds,
+  bpmOverride,
   onTogglePlay,
   onSkipNext,
   onSkipPrevious,
@@ -44,6 +46,10 @@ export function PlayerBar({
     durationSeconds ?? parseDurationToSeconds(track.duration);
   const progress =
     safeDuration > 0 ? Math.min(elapsedSeconds / safeDuration, 1) : 0;
+  const displayBpm =
+    bpmOverride !== null && bpmOverride !== undefined
+      ? Math.round(bpmOverride)
+      : track.bpm;
   const swipeStartRef = useRef<number | null>(null);
   const swipePointerRef = useRef<number | null>(null);
   const ignoreOpenRef = useRef(false);
@@ -143,7 +149,7 @@ export function PlayerBar({
           </div>
           <div className="flex flex-col items-end text-right text-[0.65rem] uppercase tracking-[0.1rem] text-white/60">
             <span className="text-sm font-semibold text-white">
-              {track.bpm} BPM
+              {displayBpm} BPM
             </span>
             <span className="mt-1 inline-flex min-w-[3rem] justify-center border border-white/40 px-2 py-0.5 text-xs font-semibold text-white">
               {track.key}

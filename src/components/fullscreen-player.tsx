@@ -51,6 +51,10 @@ export function FullScreenPlayer({
     durationSeconds ??
     waveform?.durationSeconds ??
     parseDurationToSeconds(track.duration);
+  const displayBpm =
+    waveformBpm !== null && waveformBpm !== undefined
+      ? Math.round(waveformBpm)
+      : track.bpm;
 
   const formatTime = useMemo(
     () => (value: number) => {
@@ -181,7 +185,7 @@ export function FullScreenPlayer({
             {track.artist}
           </p>
           <p className="mt-2 text-xs uppercase tracking-[0.2rem] text-white/60">
-            {track.bpm} BPM • {track.key}
+            {displayBpm} BPM • {track.key}
           </p>
         </div>
 

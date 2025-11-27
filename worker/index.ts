@@ -822,6 +822,25 @@ async function saveWaveformToDb(
       sampleRate,
     )
     .run();
+
+  const roundedBpm = analysis.bpm !== null && Number.isFinite(analysis.bpm)
+    ? Math.round(analysis.bpm)
+    : null;
+  const durationSeconds = analysis.waveform.durationSeconds ?? null;
+
+  await db
+    .prepare(
+      `
+        UPDATE track_metadata
+        SET
+          bpm = COALESCE(?, bpm),
+          duration_seconds = COALESCE(?, duration_seconds),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE track_id = ?
+      `,
+    )
+    .bind(roundedBpm, durationSeconds, trackId)
+    .run();
 }
 
 async function findTracksMissingWaveform(db: D1Database): Promise<string[]> {

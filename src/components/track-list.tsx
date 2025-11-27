@@ -360,6 +360,10 @@ function TrackListRow({
     parseDurationToSeconds(track.duration);
   const safeDurationSeconds =
     durationSeconds && durationSeconds > 0 ? durationSeconds : 1;
+  const displayBpm =
+    waveformAnalysis?.bpm !== undefined && waveformAnalysis?.bpm !== null
+      ? Math.round(waveformAnalysis.bpm)
+      : track.bpm;
   const liveTimeGetter = isRowActive ? playback?.liveTimeGetter : undefined;
   const baseCurrentTime = isRowActive ? playback?.elapsedSeconds ?? 0 : 0;
   const isRowPlaying = isRowActive ? playback?.isPlaying ?? false : false;
@@ -508,7 +512,7 @@ function TrackListRow({
               <OverviewCanvas
                 waveform={waveform}
                 duration={safeDurationSeconds}
-                bpm={track.bpm}
+                bpm={waveformAnalysis?.bpm ?? track.bpm}
                 beatOffsetSeconds={waveformAnalysis?.beatOffsetSeconds}
                 isPlaying={isRowPlaying}
                 baseCurrentTime={baseCurrentTime}
@@ -537,7 +541,7 @@ function TrackListRow({
 
         <div className="ml-auto flex w-[110px] flex-shrink-0 flex-col items-end text-right md:w-[120px]">
           <span className="truncate text-sm font-semibold tracking-tight text-foreground md:text-base">
-            {track.bpm} BPM
+            {displayBpm} BPM
           </span>
           <div className="mt-0.5 flex items-center justify-end gap-1.5 text-xs text-muted-foreground md:text-sm">
             <span className="inline-flex w-8 justify-center rounded-none border border-white/60 bg-white/80 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-tight text-black/80 md:text-xs">

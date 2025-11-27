@@ -1061,6 +1061,7 @@ function App() {
             isBuffering={isBuffering}
             elapsedSeconds={elapsedSeconds}
             durationSeconds={durationSeconds ?? undefined}
+            bpmOverride={currentWaveformAnalysis?.bpm ?? null}
             onTogglePlay={handleTogglePlay}
             onSkipNext={goToNextTrack}
             onSkipPrevious={goToPreviousTrack}
