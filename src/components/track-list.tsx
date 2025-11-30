@@ -265,7 +265,7 @@ export function TrackList({
         extraControls={extraControls}
       />
 
-      <div className="flex-1 overflow-auto pb-48 pt-1 md:pb-12">
+      <div className="flex-1 overflow-auto pb-6">
         {showFullBackRow && header?.onBack && (
           <button
             type="button"

@@ -15,7 +15,7 @@ const TABS: Array<{ key: LibraryTabKey; label: string }> = [
 
 export function LibraryTabs({ activeTab, onTabChange }: LibraryTabsProps) {
   return (
-    <nav className="flex items-stretch border-t border-white/10 bg-black/70 text-[0.7rem] font-semibold uppercase tracking-[0.16rem] text-white/70">
+    <nav className="flex items-stretch border-t border-white/10 bg-black/60 text-[0.55rem] font-semibold uppercase tracking-[0.12rem] text-white/60">
       {TABS.map((tab) => {
         const isActive = tab.key === activeTab;
         return (
@@ -23,8 +23,8 @@ export function LibraryTabs({ activeTab, onTabChange }: LibraryTabsProps) {
             key={tab.key}
             type="button"
             className={cn(
-              "flex-1 px-3 py-3 transition md:px-4 md:py-2",
-              "tracking-[0.16rem]",
+              "flex-1 px-2 py-1 transition",
+              "tracking-[0.12rem]",
               isActive
                 ? "bg-white/10 text-white"
                 : "text-white/55 hover:bg-white/5 hover:text-white",

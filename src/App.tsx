@@ -993,8 +993,8 @@ function App() {
   }, [flushAllPendingNoteUpdates]);
 
   return (
-    <div className="flex min-h-[100dvh] flex-col overflow-hidden bg-[#010308] text-foreground">
-      <div className="flex flex-1 flex-col overflow-hidden pt-3">
+    <div className="flex h-screen flex-col overflow-hidden bg-[#010308] text-foreground">
+      <div className="flex flex-1 flex-col overflow-hidden pt-4">
         <div className="min-h-0 flex-1">
           {libraryView.type === "playlists" ? (
             <PlaylistBrowser
@@ -1050,10 +1050,7 @@ function App() {
       </div>
 
       {currentTrack && (
-        <div
-          className="fixed inset-x-0 bottom-0 z-40 flex flex-col border-t border-white/10 bg-[rgba(3,4,12,0.95)] backdrop-blur-xl shadow-[0_-24px_48px_rgba(0,0,0,0.55)] md:static md:border-t-0 md:bg-transparent md:shadow-none"
-          style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.5rem)" }}
-        >
+        <div className="flex flex-col pb-2 shrink-0">
           <TrackNotesEditor
             track={currentTrack}
             annotation={currentAnnotation}
@@ -1075,7 +1072,6 @@ function App() {
             onSkipNext={goToNextTrack}
             onSkipPrevious={goToPreviousTrack}
             onOpenFullScreen={handleOpenFullScreen}
-            className="md:rounded-none"
           />
           <LibraryTabs activeTab={activeTab} onTabChange={handleTabChange} />
         </div>

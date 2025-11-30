@@ -160,7 +160,7 @@ export function PlaylistCreatePanel({ onPlaylistCreated }: PlaylistCreatePanelPr
         showClearButton={false}
       />
 
-      <div className="flex-1 overflow-auto px-3.5 pb-48 pt-1 text-white md:px-5 md:pb-12">
+      <div className="flex-1 overflow-auto px-3.5 pb-6 text-white md:px-5">
         <div className="flex items-center gap-3 rounded border border-white/10 bg-black/50 px-4 py-4">
           {previewThumbnailUrl ? (
             <img
