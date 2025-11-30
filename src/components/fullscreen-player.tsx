@@ -6,16 +6,10 @@ import {
   useState,
 } from "react";
 
-import {
-  ChevronDown,
-  Loader2,
-  Pause,
-  Play,
-  SkipBack,
-  SkipForward,
-} from "lucide-react";
+import { ChevronDown } from "lucide-react";
 
 import { DetailCanvas, OverviewCanvas } from "@/components/waveform-canvas";
+import { FullPlayerBottom } from "@/components/full-player-bottom";
 import { Track } from "@/data/tracks";
 import { parseDurationToSeconds } from "@/lib/time";
 import type { WaveformData } from "@/lib/waveform";
@@ -62,6 +56,11 @@ export function FullScreenPlayer({
     durationSeconds ??
     waveform?.durationSeconds ??
     parseDurationToSeconds(track.duration);
+  const safeBpm =
+    waveformBpm !== null && waveformBpm !== undefined && waveformBpm > 0
+      ? waveformBpm
+      : track.bpm ?? 120;
+  const secondsPerBar = (60 / Math.max(safeBpm, 1)) * 4;
   const displayBpm =
     waveformBpm !== null && waveformBpm !== undefined
       ? Math.round(waveformBpm)
@@ -173,7 +172,7 @@ export function FullScreenPlayer({
         <div className="h-10 w-10" />
       </header>
 
-      <div className="flex w-full flex-1 flex-col items-center gap-3 px-3 pb-36 pt-5 text-center sm:gap-4 sm:pb-40 md:gap-5 md:px-5">
+      <div className="flex w-full flex-1 flex-col items-center gap-3 px-3 pb-40 pt-5 text-center sm:gap-4 sm:pb-44 md:gap-5 md:px-5">
         <div className="w-full max-w-4xl overflow-hidden rounded-2xl bg-black/35 shadow-[0_25px_80px_rgba(0,0,0,0.65)] backdrop-blur px-3 py-4 md:px-4">
           {waveform ? (
             <div style={{ height: canvasHeights.detail }} className="w-full">
@@ -265,42 +264,18 @@ export function FullScreenPlayer({
             )}
           </div>
         </div>
-      </div>
 
-      <div className="fixed inset-x-0 bottom-[5vh] z-20 flex justify-center px-4 sm:px-6">
-        <div className="flex w-full max-w-3xl items-center justify-center gap-2 rounded-full bg-black/70 px-3 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.7)] backdrop-blur-xl sm:gap-4 sm:px-5">
-          <button
-            type="button"
-            onClick={onSkipPrevious}
-            className="flex h-11 w-12 items-center justify-center rounded-full bg-white/12 text-white transition hover:bg-white/18 sm:h-12 sm:w-12"
-            aria-label="Previous track"
-          >
-            <SkipBack className="h-[18px] w-[18px] sm:h-5 sm:w-5" />
-          </button>
-          <button
-            type="button"
-            onClick={onTogglePlay}
-            disabled={isBuffering}
-            className="flex h-12 w-14 items-center justify-center rounded-full bg-white text-black shadow-lg transition hover:bg-white/90 disabled:cursor-not-allowed disabled:bg-white/50 disabled:text-black/60 sm:h-[56px] sm:w-[64px]"
-            aria-label={isPlaying ? "Pause" : "Play"}
-          >
-            {isBuffering ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : isPlaying ? (
-              <Pause className="h-5 w-5" />
-            ) : (
-              <Play className="h-5 w-5" />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={onSkipNext}
-            className="flex h-11 w-12 items-center justify-center rounded-full bg-white/12 text-white transition hover:bg-white/18 sm:h-12 sm:w-12"
-            aria-label="Next track"
-          >
-            <SkipForward className="h-[18px] w-[18px] sm:h-5 sm:w-5" />
-          </button>
-        </div>
+        <FullPlayerBottom
+          isPlaying={isPlaying}
+          isBuffering={isBuffering}
+          elapsedSeconds={elapsedSeconds}
+          durationSeconds={safeDuration}
+          bpm={safeBpm}
+          onTogglePlay={onTogglePlay}
+          onSkipNext={onSkipNext}
+          onSkipPrevious={onSkipPrevious}
+          onSeek={onSeek}
+        />
       </div>
     </div>
   );
