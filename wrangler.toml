@@ -6,6 +6,29 @@ compatibility_date = "2025-11-22"
 # Separate preview script name so Durable Objects/D1/R2 use isolated namespaces
 name = "zero-control-dapp-preview"
 
+[env.preview.vars]
+SONG_PASSWORD = "true"
+
+[[env.preview.r2_buckets]]
+binding = "TRACKS_BUCKET"
+bucket_name = "zero-control-tracks"
+preview_bucket_name = "zero-control-tracks-preview"
+
+[[env.preview.d1_databases]]
+binding = "TRACKS_DB"
+database_id = "c3db5162-f931-444f-883a-40ceeabf2fb2"
+database_name = "zero-control-tracks-preview"
+
+[[env.preview.containers]]
+class_name = "AnalyzerContainer"
+image = "./containers/analyzer/Dockerfile"
+max_instances = 2
+instance_type = "standard-2"
+
+[[env.preview.durable_objects.bindings]]
+name = "ANALYZER_CONTAINER"
+class_name = "AnalyzerContainer"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
