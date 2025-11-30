@@ -46,13 +46,11 @@ export function PlayerBar({
       ? Math.round(bpmOverride)
       : track.bpm;
   const swipeStartRef = useRef<number | null>(null);
-  const swipeStartYRef = useRef<number | null>(null);
   const swipePointerRef = useRef<number | null>(null);
   const ignoreOpenRef = useRef(false);
 
   const resetSwipe = () => {
     swipeStartRef.current = null;
-    swipeStartYRef.current = null;
     swipePointerRef.current = null;
   };
 
@@ -69,27 +67,8 @@ export function PlayerBar({
     }
 
     swipeStartRef.current = event.clientX;
-    swipeStartYRef.current = event.clientY;
     swipePointerRef.current = event.pointerId;
     event.currentTarget.setPointerCapture(event.pointerId);
-  };
-
-  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    if (
-      swipePointerRef.current === null ||
-      swipePointerRef.current !== event.pointerId
-    ) {
-      return;
-    }
-
-    const startY = swipeStartYRef.current;
-    if (startY === null) return;
-    const deltaY = Math.abs(event.clientY - startY);
-
-    if (deltaY > 30 && event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-      resetSwipe();
-    }
   };
 
   const handlePointerCancel = (event: PointerEvent<HTMLDivElement>) => {
@@ -113,16 +92,9 @@ export function PlayerBar({
     if (swipeStartRef.current === null) return;
 
     const startX = swipeStartRef.current ?? event.clientX;
-    const startY = swipeStartYRef.current ?? event.clientY;
     const deltaX = event.clientX - startX;
-    const deltaY = Math.abs(event.clientY - startY);
     const threshold = 60;
     let didSwipe = false;
-    if (deltaY > 40 && Math.abs(deltaX) < threshold) {
-      resetSwipe();
-      ignoreOpenRef.current = false;
-      return;
-    }
     if (deltaX <= -threshold) {
       onSkipNext();
       didSwipe = true;
@@ -147,7 +119,6 @@ export function PlayerBar({
       <div
         className="relative overflow-hidden bg-[rgba(2,2,6,0.98)] px-4 py-3 text-white shadow-[0_-15px_60px_rgba(0,0,0,0.65)]"
         onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
       >

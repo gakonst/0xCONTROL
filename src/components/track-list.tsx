@@ -342,7 +342,6 @@ function TrackListRow({
   const [isDragging, setIsDragging] = useState(false);
   const pointerIdRef = useRef<number | null>(null);
   const startXRef = useRef(0);
-  const startYRef = useRef(0);
   const suppressClickRef = useRef(false);
   const actionThreshold = 72;
   const maxOffset = 160;
@@ -380,7 +379,6 @@ function TrackListRow({
   const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
     pointerIdRef.current = event.pointerId;
     startXRef.current = event.clientX;
-    startYRef.current = event.clientY;
     suppressClickRef.current = false;
     setIsDragging(true);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -388,15 +386,6 @@ function TrackListRow({
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (pointerIdRef.current !== event.pointerId) return;
-    const deltaY = Math.abs(event.clientY - startYRef.current);
-    if (deltaY > 18) {
-      suppressClickRef.current = true;
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
-      resetDrag();
-      return;
-    }
     const delta = clampOffset(event.clientX - startXRef.current);
     setDragOffset(delta);
     if (Math.abs(delta) > 6) {
