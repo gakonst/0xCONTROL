@@ -1,4 +1,4 @@
-import { type PointerEvent, useMemo, useRef, useState } from "react";
+import { type PointerEvent, useMemo, useRef } from "react";
 
 import {
   ChevronDown,
@@ -7,8 +7,6 @@ import {
   Play,
   SkipBack,
   SkipForward,
-  Minus,
-  Plus,
 } from "lucide-react";
 
 import { DetailCanvas, OverviewCanvas } from "@/components/waveform-canvas";
@@ -49,7 +47,7 @@ export function FullScreenPlayer({
   onClose,
   onSeek,
 }: FullScreenPlayerProps) {
-  const [detailZoom, setDetailZoom] = useState(8);
+  const detailZoom = 16;
   const safeDuration =
     durationSeconds ??
     waveform?.durationSeconds ??
@@ -112,7 +110,7 @@ export function FullScreenPlayer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-gradient-to-b from-black via-[#100b1b] to-[#010308] text-white">
+    <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-gradient-to-b from-black via-[#100b1b] to-[#010308] text-white">
       <div className="absolute inset-0 -z-10 opacity-40">
         {track.cover ? (
           <img
@@ -147,8 +145,8 @@ export function FullScreenPlayer({
         <div className="h-10 w-10" />
       </header>
 
-      <div className="flex flex-1 flex-col items-center gap-6 px-6 pb-10 pt-8 text-center">
-        <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-white/20 bg-black/25 shadow-[0_25px_80px_rgba(0,0,0,0.65)] backdrop-blur px-2 py-3 md:px-3">
+      <div className="flex w-full flex-1 flex-col items-center gap-3 px-3 pb-14 pt-5 text-center sm:gap-4 md:gap-5 md:px-5">
+        <div className="w-full max-w-4xl overflow-hidden rounded-none border border-white/20 bg-black/25 shadow-[0_25px_80px_rgba(0,0,0,0.65)] backdrop-blur px-2 py-3 md:px-3">
           {waveform ? (
             <DetailCanvas
               waveform={waveform}
@@ -160,8 +158,9 @@ export function FullScreenPlayer({
               baseCurrentTime={elapsedSeconds}
               liveTimeGetter={liveTimeGetter}
               onSeek={(ratio) => onSeek(ratio * safeDuration)}
-              height={220}
-              className="relative h-[220px] w-full md:h-[260px]"
+              height={150}
+              className="relative h-[150px] w-full sm:h-[180px] md:h-[220px]"
+              rounded={false}
             />
           ) : (
             <div className="flex h-[280px] w-full items-center justify-center bg-gradient-to-b from-white/5 to-white/0">
@@ -193,34 +192,11 @@ export function FullScreenPlayer({
         </div>
 
         <div className="w-full max-w-4xl space-y-2">
-          <div className="flex items-center justify-between text-xs text-white/70">
+          <div className="flex items-center justify-between text-[11px] text-white/70 sm:text-xs">
             <span>{formatTime(elapsedSeconds)}</span>
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-white/70">
-              <button
-                type="button"
-                onClick={() =>
-                  setDetailZoom((z: number) => Math.max(1, +(z - 1).toFixed(1)))
-                }
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-white/10 transition hover:bg-white/20"
-                aria-label="Zoom out"
-              >
-                <Minus className="h-4 w-4" />
-              </button>
-              <span className="min-w-[52px] text-center text-white">{detailZoom.toFixed(1)}×</span>
-              <button
-                type="button"
-                onClick={() =>
-                  setDetailZoom((z: number) => Math.min(32, +(z + 1).toFixed(1)))
-                }
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-white/10 transition hover:bg-white/20"
-                aria-label="Zoom in"
-              >
-                <Plus className="h-4 w-4" />
-              </button>
-            </div>
             <span>{formatTime(safeDuration)}</span>
           </div>
-          <div className="rounded-xl border border-white/15 bg-black/30 p-2">
+          <div className="rounded-none border border-white/15 bg-black/30 p-1.5 sm:p-2">
             {waveform ? (
               <OverviewCanvas
                 waveform={waveform}
@@ -231,11 +207,12 @@ export function FullScreenPlayer({
                 baseCurrentTime={elapsedSeconds}
                 liveTimeGetter={liveTimeGetter}
                 onSeek={(ratio) => onSeek(ratio * safeDuration)}
-                height={72}
-                className="relative h-[72px] w-full md:h-[88px]"
+                height={48}
+                className="relative h-[48px] w-full rounded-none sm:h-[60px] md:h-[82px]"
+                rounded={false}
               />
             ) : (
-              <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-white/20">
+              <div className="mt-1 h-[2px] w-full overflow-hidden rounded-none bg-white/20 sm:h-1">
                 <div
                   className="h-full bg-white"
                   style={{
@@ -251,37 +228,37 @@ export function FullScreenPlayer({
           </div>
         </div>
 
-        <div className="mt-4 flex items-center justify-center gap-6">
+        <div className="sticky inset-x-0 bottom-3 z-10 mt-3 flex w-full max-w-none items-center justify-center gap-2 rounded-none border border-white/25 bg-black/80 px-3 py-2 backdrop-blur sm:bottom-4 sm:gap-3 sm:px-4 mx-[-12px] sm:mx-[-16px] md:mx-[-20px]">
           <button
             type="button"
             onClick={onSkipPrevious}
-            className="flex h-12 w-12 items-center justify-center rounded-full border border-white/40 bg-white/10"
+            className="flex h-10 w-12 items-center justify-center rounded-none border border-white/40 bg-white/10 sm:h-11 sm:w-12"
             aria-label="Previous track"
           >
-            <SkipBack className="h-5 w-5" />
+            <SkipBack className="h-[18px] w-[18px] sm:h-5 sm:w-5" />
           </button>
           <button
             type="button"
             onClick={onTogglePlay}
             disabled={isBuffering}
-            className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black shadow-lg transition hover:bg-white/90 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-black/60"
+            className="flex h-12 w-14 items-center justify-center rounded-none bg-white text-black shadow-lg transition hover:bg-white/90 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-black/60 sm:h-[56px] sm:w-[60px]"
             aria-label={isPlaying ? "Pause" : "Play"}
           >
             {isBuffering ? (
-              <Loader2 className="h-6 w-6 animate-spin" />
+              <Loader2 className="h-5 w-5 animate-spin" />
             ) : isPlaying ? (
-              <Pause className="h-6 w-6" />
+              <Pause className="h-5 w-5" />
             ) : (
-              <Play className="h-6 w-6" />
+              <Play className="h-5 w-5" />
             )}
           </button>
           <button
             type="button"
             onClick={onSkipNext}
-            className="flex h-12 w-12 items-center justify-center rounded-full border border-white/40 bg-white/10"
+            className="flex h-10 w-12 items-center justify-center rounded-none border border-white/40 bg-white/10 sm:h-11 sm:w-12"
             aria-label="Next track"
           >
-            <SkipForward className="h-5 w-5" />
+            <SkipForward className="h-[18px] w-[18px] sm:h-5 sm:w-5" />
           </button>
         </div>
       </div>

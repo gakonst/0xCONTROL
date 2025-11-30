@@ -3,6 +3,7 @@ import {
   useRef,
   useState,
   type MutableRefObject,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import type { WaveformData } from "@/lib/waveform";
@@ -82,6 +83,7 @@ function WaveformCanvas({
   const dragPreviewTime = useRef<number | null>(null);
   const suppressNextClick = useRef(false);
   const smoothedCenter = useRef<number | null>(null);
+  const activePointerId = useRef<number | null>(null);
 
   const isOverview = variant === "overview";
   const effectiveMirror = mirror ?? !isOverview;
@@ -341,15 +343,18 @@ function WaveformCanvas({
   return (
     <div
       ref={containerRef}
-      className={
-        className ?? `relative w-full ${isOverview ? "h-[96px]" : "h-[320px]"} select-none`
-      }
+      className={className
+        ? `${className} touch-none select-none`
+        : `relative w-full ${isOverview ? "h-[96px]" : "h-[320px]"} select-none touch-none`}
     >
       <canvas
         ref={canvasRef}
         className={`absolute inset-0 cursor-pointer bg-slate-950 ${rounded ? "rounded-lg" : ""}`}
-        onMouseDown={(event) => {
+        onPointerDown={(event: ReactPointerEvent<HTMLCanvasElement>) => {
           if (!duration) return;
+          event.preventDefault();
+          activePointerId.current = event.pointerId;
+          event.currentTarget.setPointerCapture(event.pointerId);
           dragging.current = true;
           dragStartX.current = event.clientX;
           dragStartTime.current = liveTimeGetter?.() ?? baseCurrentTime;
@@ -361,8 +366,10 @@ function WaveformCanvas({
             event.currentTarget.style.cursor = "pointer";
           }
         }}
-        onMouseMove={(event) => {
+        onPointerMove={(event: ReactPointerEvent<HTMLCanvasElement>) => {
           if (!duration) return;
+          if (activePointerId.current !== null && event.pointerId !== activePointerId.current) return;
+
           if (dragging.current && effectiveFixedCenter && zoom > 1) {
             const rect = event.currentTarget.getBoundingClientRect();
             const deltaPx = event.clientX - (dragStartX.current ?? event.clientX);
@@ -388,7 +395,11 @@ function WaveformCanvas({
             onSeek(ratio);
           }
         }}
-        onMouseUp={(event) => {
+        onPointerUp={(event: ReactPointerEvent<HTMLCanvasElement>) => {
+          if (activePointerId.current !== null && event.pointerId !== activePointerId.current) return;
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
           if (dragging.current && effectiveFixedCenter && zoom > 1 && dragPreviewTime.current !== null) {
             suppressNextClick.current = true;
             onSeek(dragPreviewTime.current / Math.max(duration, 0.001));
@@ -406,10 +417,20 @@ function WaveformCanvas({
           }
           dragging.current = false;
           dragPreviewTime.current = null;
+          activePointerId.current = null;
         }}
-        onMouseLeave={() => {
+        onPointerCancel={(event: ReactPointerEvent<HTMLCanvasElement>) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
           dragging.current = false;
           dragPreviewTime.current = null;
+          activePointerId.current = null;
+        }}
+        onPointerLeave={() => {
+          dragging.current = false;
+          dragPreviewTime.current = null;
+          activePointerId.current = null;
         }}
         onClick={(event) => {
           if (suppressNextClick.current) {
