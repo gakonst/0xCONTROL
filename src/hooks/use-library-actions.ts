@@ -52,8 +52,10 @@ export function useLibraryActions({
 
   const visibleTracks = useMemo(() => {
     if (navigation.route.view.type === "playlistDetail" && activePlaylist) {
-      const ids = new Set(activePlaylist.trackIds);
-      return tracks.filter((t) => ids.has(t.id));
+      const trackMap = new Map(tracks.map((track) => [track.id, track]));
+      return activePlaylist.trackIds
+        .map((id) => trackMap.get(id))
+        .filter((track): track is Track => Boolean(track));
     }
     return tracks;
   }, [navigation.route.view, activePlaylist, tracks]);

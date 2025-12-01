@@ -190,6 +190,7 @@ function App() {
       durationSeconds={preferredDurationSeconds ?? undefined}
       bpmOverride={currentWaveformAnalysis?.bpm ?? null}
       waveform={currentWaveformAnalysis?.waveform ?? null}
+      beatOffsetSeconds={currentWaveformAnalysis?.beatOffsetSeconds ?? null}
       liveTimeGetter={playbackApi.liveTimeGetter}
       onTogglePlay={playbackApi.controls.togglePlay}
       onSkipNext={playbackApi.controls.next}

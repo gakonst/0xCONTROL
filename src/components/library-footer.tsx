@@ -17,6 +17,7 @@ export type LibraryFooterProps = {
   durationSeconds?: number;
   bpmOverride?: number | null;
   waveform?: WaveformData | null;
+  beatOffsetSeconds?: number | null;
   liveTimeGetter?: () => number;
   onTogglePlay: () => void;
   onSkipNext: () => void;
@@ -37,6 +38,7 @@ function LibraryFooterComponent({
   durationSeconds,
   bpmOverride,
   waveform,
+  beatOffsetSeconds,
   liveTimeGetter,
   onTogglePlay,
   onSkipNext,
@@ -65,6 +67,7 @@ function LibraryFooterComponent({
         durationSeconds={durationSeconds}
         bpmOverride={bpmOverride ?? undefined}
         waveform={waveform ?? undefined}
+        beatOffsetSeconds={beatOffsetSeconds ?? undefined}
         liveTimeGetter={liveTimeGetter}
         onTogglePlay={onTogglePlay}
         onSkipNext={onSkipNext}
@@ -89,6 +92,7 @@ export const LibraryFooter = memo(LibraryFooterComponent, (prev, next) => {
     prev.durationSeconds === next.durationSeconds &&
     prev.bpmOverride === next.bpmOverride &&
     prev.waveform === next.waveform &&
+    prev.beatOffsetSeconds === next.beatOffsetSeconds &&
     prev.liveTimeGetter === next.liveTimeGetter &&
     prev.activeTab === next.activeTab &&
     prev.onTabChange === next.onTabChange &&

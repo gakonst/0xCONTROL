@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import { LibraryHeader } from "@/components/library-header";
 import { OverviewCanvas } from "@/components/waveform-canvas";
 import { useWaveform } from "@/hooks/use-waveform";
-import { formatSecondsToClock, parseDurationToSeconds } from "@/lib/time";
+import { formatSecondsToClock } from "@/lib/time";
 
 export type TrackSortField = "title" | "bpm" | "key" | null;
 export type TrackSortDirection = "asc" | "desc";

@@ -16,6 +16,7 @@ type PlayerBarProps = {
   durationSeconds?: number | null;
   bpmOverride?: number | null;
   waveform?: WaveformData | null;
+  beatOffsetSeconds?: number | null;
   liveTimeGetter?: () => number;
   onTogglePlay: () => void;
   onSkipNext: () => void;
@@ -33,6 +34,7 @@ function PlayerBarComponent({
   durationSeconds,
   bpmOverride,
   waveform,
+  beatOffsetSeconds,
   liveTimeGetter,
   onTogglePlay,
   onSkipNext,
@@ -135,7 +137,7 @@ function PlayerBarComponent({
                 isPlaying={isPlaying}
                 baseCurrentTime={elapsedSeconds}
                 liveTimeGetter={liveTimeGetter}
-                beatOffsetSeconds={null}
+                beatOffsetSeconds={beatOffsetSeconds ?? null}
                 onSeek={() => {}}
                 height={64}
                 className="absolute inset-0"
@@ -195,6 +197,7 @@ export const PlayerBar = memo(PlayerBarComponent, (prev, next) => {
     prev.durationSeconds === next.durationSeconds &&
     prev.bpmOverride === next.bpmOverride &&
     prev.waveform === next.waveform &&
+    prev.beatOffsetSeconds === next.beatOffsetSeconds &&
     prev.liveTimeGetter === next.liveTimeGetter &&
     prev.className === next.className &&
     prev.variant === next.variant

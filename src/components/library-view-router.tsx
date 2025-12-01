@@ -95,14 +95,7 @@ export function LibraryViewRouter({
 
   return (
     <div className="relative h-full w-full">
-      <div
-        className={
-          isPlaylists
-            ? "absolute inset-0 h-full w-full opacity-100 transition-opacity"
-            : "absolute inset-0 h-full w-full opacity-0 pointer-events-none transition-opacity"
-        }
-        aria-hidden={!isPlaylists}
-      >
+      {isPlaylists && (
         <PlaylistBrowser
           playlists={playlists}
           tracks={tracks}
@@ -116,27 +109,11 @@ export function LibraryViewRouter({
           onTogglePin={onTogglePin}
           onToggleFavorite={onToggleFavorite}
         />
-      </div>
+      )}
 
-      <div
-        className={
-          isCreate
-            ? "absolute inset-0 h-full w-full opacity-100 transition-opacity"
-            : "absolute inset-0 h-full w-full opacity-0 pointer-events-none transition-opacity"
-        }
-        aria-hidden={!isCreate}
-      >
-        <PlaylistCreatePanel onPlaylistCreated={onPlaylistCreated} />
-      </div>
+      {isCreate && <PlaylistCreatePanel onPlaylistCreated={onPlaylistCreated} />}
 
-      <div
-        className={
-          !isPlaylists && !isCreate
-            ? "absolute inset-0 h-full w-full opacity-100 transition-opacity"
-            : "absolute inset-0 h-full w-full opacity-0 pointer-events-none transition-opacity"
-        }
-        aria-hidden={isPlaylists || isCreate}
-      >
+      {!isPlaylists && !isCreate && (
         <TrackList
           className="h-full w-full"
           tracks={visibleTracks}
@@ -154,7 +131,7 @@ export function LibraryViewRouter({
           annotations={annotations}
           playback={playback}
         />
-      </div>
+      )}
     </div>
   );
 }

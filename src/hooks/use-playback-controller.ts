@@ -45,11 +45,16 @@ export function usePlaybackController(
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const trackUrlRef = useRef<string>("");
   const goToNextTrackRef = useRef<() => void>(() => {});
+  const tracksRef = useRef<Track[]>(tracks);
 
   const currentTrack = useMemo(
     () => tracks.find((track) => track.id === currentTrackId),
     [currentTrackId, tracks],
   );
+
+  useEffect(() => {
+    tracksRef.current = tracks;
+  }, [tracks]);
 
   useEffect(() => {
     if (!tracks.length) return;
@@ -106,8 +111,22 @@ export function usePlaybackController(
     const handleWaiting = () => setIsBuffering(true);
     const handlePlaying = () => setIsBuffering(false);
     const handleEnded = () => {
-      goToNextTrackRef.current();
-      setIsPlaying(true);
+      const availableTracks = tracksRef.current;
+      const hasAlternateTrack = availableTracks.length > 1;
+
+      if (hasAlternateTrack) {
+        goToNextTrackRef.current();
+        setIsPlaying(true);
+        return;
+      }
+
+      const audioEl = audioRef.current;
+      if (audioEl) {
+        audioEl.currentTime = 0;
+        audioEl.pause();
+      }
+      setElapsedSeconds(0);
+      setIsPlaying(false);
     };
 
     audio.addEventListener("timeupdate", handleTimeUpdate);
