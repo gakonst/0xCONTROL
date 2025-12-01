@@ -8,7 +8,10 @@ export function useWaveform(trackId?: string | null) {
     queryKey: ["waveform", trackId ?? "none"],
     queryFn: () => fetchWaveformAnalysis(trackId ?? ""),
     enabled: Boolean(trackId),
-    staleTime: 1000 * 60 * 30,
-    gcTime: 1000 * 60 * 60,
+    staleTime: 1000 * 60 * 60 * 24, // keep warm all day
+    gcTime: 1000 * 60 * 60 * 24 * 7, // retain for a week
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 }

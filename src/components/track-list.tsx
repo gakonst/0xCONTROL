@@ -1,4 +1,5 @@
 import {
+  memo,
   useMemo,
   useRef,
   useState,
@@ -315,7 +316,9 @@ export function TrackList({
             }
             quickAddLabel={quickAddLabel}
             quickRemoveLabel={quickRemoveLabel}
-            playback={playback}
+            playback={
+              playback?.trackId === track.id ? playback : undefined
+            }
           />
         ))}
       </div>
@@ -340,7 +343,7 @@ type TrackListRowProps = {
   };
 };
 
-function TrackListRow({
+const TrackListRow = memo(function TrackListRow({
   track,
   isActive,
   onSelect,
@@ -592,7 +595,23 @@ function TrackListRow({
       </button>
     </div>
   );
-}
+}, (prev, next) => {
+  return (
+    prev.track.id === next.track.id &&
+    prev.track.annotation === next.track.annotation &&
+    prev.isActive === next.isActive &&
+    prev.onSelect === next.onSelect &&
+    prev.onQuickAdd === next.onQuickAdd &&
+    prev.onQuickRemove === next.onQuickRemove &&
+    prev.quickAddLabel === next.quickAddLabel &&
+    prev.quickRemoveLabel === next.quickRemoveLabel &&
+    prev.playback?.trackId === next.playback?.trackId &&
+    prev.playback?.isPlaying === next.playback?.isPlaying &&
+    prev.playback?.elapsedSeconds === next.playback?.elapsedSeconds &&
+    prev.playback?.durationSeconds === next.playback?.durationSeconds &&
+    prev.playback?.liveTimeGetter === next.playback?.liveTimeGetter
+  );
+});
 
 type BpmComparisonOperator = ">" | "<" | ">=" | "<=" | "=";
 

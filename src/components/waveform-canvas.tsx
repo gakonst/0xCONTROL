@@ -1,4 +1,5 @@
 import {
+  memo,
   useEffect,
   useRef,
   useState,
@@ -28,7 +29,7 @@ export type WaveformCanvasProps = {
   showPlayhead?: boolean;
 };
 
-export function OverviewCanvas(
+function OverviewCanvasComponent(
   props: Omit<WaveformCanvasProps, "variant" | "mirror" | "fixedCenter" | "zoom">,
 ) {
   return (
@@ -55,6 +56,23 @@ export function DetailCanvas(
     />
   );
 }
+
+export const OverviewCanvas = memo(OverviewCanvasComponent, (prev, next) => {
+  return (
+    prev.waveform === next.waveform &&
+    prev.duration === next.duration &&
+    prev.bpm === next.bpm &&
+    prev.beatOffsetSeconds === next.beatOffsetSeconds &&
+    prev.isPlaying === next.isPlaying &&
+    prev.baseCurrentTime === next.baseCurrentTime &&
+    prev.liveTimeGetter === next.liveTimeGetter &&
+    prev.onSeek === next.onSeek &&
+    prev.height === next.height &&
+    prev.className === next.className &&
+    prev.rounded === next.rounded &&
+    prev.showPlayhead === next.showPlayhead
+  );
+});
 
 function WaveformCanvas({
   waveform,
