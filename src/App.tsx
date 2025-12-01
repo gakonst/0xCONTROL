@@ -1094,6 +1094,13 @@ function App() {
           onSkipPrevious={goToPreviousTrack}
           onClose={() => setIsFullScreenPlayerOpen(false)}
           onSeek={handleSeek}
+          annotation={currentAnnotation}
+          onAnnotationChange={handleAnnotationChange}
+          activeTab={activeTab}
+          onTabChange={(tab) => {
+            handleTabChange(tab);
+            setIsFullScreenPlayerOpen(false);
+          }}
         />
       )}
     </div>
