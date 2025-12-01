@@ -1,5 +1,6 @@
 import {
   type PointerEvent,
+  type RefObject,
   useEffect,
   useMemo,
   useRef,
@@ -59,6 +60,8 @@ export function FullScreenPlayer({
   onTabChange,
 }: FullScreenPlayerProps) {
   const [controlsInteractive, setControlsInteractive] = useState(false);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const [bottomInset, setBottomInset] = useState(200);
   const [canvasHeights, setCanvasHeights] = useState({
     detail: 170,
     overview: 54,
@@ -114,6 +117,22 @@ export function FullScreenPlayer({
     return () => window.clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    const measure = () => {
+      const h = bottomRef.current?.offsetHeight ?? 0;
+      setBottomInset(h > 0 ? h + 12 : 200);
+    };
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    if (bottomRef.current) observer.observe(bottomRef.current);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
   const resetSwipe = () => {
     swipeStartRef.current = null;
     swipePointerRef.current = null;
@@ -154,7 +173,7 @@ export function FullScreenPlayer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-gradient-to-b from-black via-[#100b1b] to-[#010308] text-white">
+    <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-gradient-to-b from-black via-[#100b1b] to-[#010308] text-white">
       <div className="absolute inset-0 -z-10 opacity-40">
         {track.cover ? (
           <img
@@ -188,7 +207,10 @@ export function FullScreenPlayer({
         <div className="h-10 w-10" />
       </header>
 
-      <div className="flex w-full flex-1 flex-col items-center gap-3 px-3 pb-[21rem] pt-5 text-center sm:gap-4 sm:pb-[21rem] md:gap-5 md:px-5 md:pb-[22rem]">
+      <div
+        className="flex w-full flex-1 flex-col items-center gap-3 overflow-y-auto px-3 pt-5 text-center sm:gap-4 md:gap-5 md:px-5"
+        style={{ paddingBottom: bottomInset }}
+      >
         <div className="w-full overflow-hidden rounded-2xl bg-black/35 shadow-[0_25px_80px_rgba(0,0,0,0.65)] backdrop-blur px-3 py-4 md:px-4 overscroll-none">
           {waveform ? (
             <div
@@ -303,6 +325,7 @@ export function FullScreenPlayer({
           activeTab={activeTab}
           onTabChange={onTabChange}
           interactive={controlsInteractive}
+          bottomRef={bottomRef}
         />
       </div>
     </div>
@@ -325,6 +348,7 @@ type FullScreenBottomPanelProps = {
   activeTab: LibraryTabKey;
   onTabChange: (tab: LibraryTabKey) => void;
   interactive: boolean;
+  bottomRef: RefObject<HTMLDivElement>;
 };
 
 function FullScreenBottomPanel({
@@ -343,9 +367,10 @@ function FullScreenBottomPanel({
   activeTab,
   onTabChange,
   interactive,
+  bottomRef,
 }: FullScreenBottomPanelProps) {
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-0 pb-0">
+    <div ref={bottomRef} className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-0 pb-0">
       <div
         className={`w-full overflow-hidden bg-[rgba(2,2,6,0.98)] text-white shadow-[0_-15px_60px_rgba(0,0,0,0.65)] ${interactive ? "pointer-events-auto" : "pointer-events-none"}`}
       >
