@@ -104,8 +104,15 @@ function WaveformCanvas({
       const targetHeight = height ?? (isOverview
         ? Math.max(56, Math.floor(rectHeight))
         : Math.max(140, Math.floor(rectHeight)));
+
+      // Respect the actual measured width for tiny containers (e.g., list thumbnails)
+      // instead of forcing a 320px minimum, but fall back to a sane default when the
+      // element is hidden and reports 0.
+      const measuredWidth = Math.floor(width);
+      const safeWidth = measuredWidth > 0 ? measuredWidth : 320;
+
       setSize({
-        width: Math.max(320, Math.floor(width)),
+        width: Math.max(1, safeWidth),
         height: targetHeight,
       });
     });
