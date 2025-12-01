@@ -6,6 +6,7 @@ import { Track } from "@/data/tracks";
 import { cn } from "@/lib/utils";
 import { OverviewCanvas } from "@/components/waveform-canvas";
 import type { WaveformData } from "@/lib/waveform";
+import { PlaybackSurface } from "@/components/playback-surface";
 
 type PlayerBarProps = {
   track: Track;
@@ -116,83 +117,71 @@ export function PlayerBar({
     onTogglePlay();
   };
 
-  const panelClasses = cn(
-    "relative overflow-hidden text-white",
-    variant === "standard"
-      ? "bg-[rgba(2,2,6,0.98)] px-4 py-3 shadow-[0_-15px_60px_rgba(0,0,0,0.65)]"
-      : "px-0 py-0",
-  );
-
   return (
     <footer className={cn("w-full", className)}>
-      <div
-        className={panelClasses}
+      <PlaybackSurface
+        progress={progress}
+        background={variant === "standard" ? "solid" : "transparent"}
+        className={variant === "standard" ? undefined : "bg-transparent shadow-none"}
+        paddingClassName={variant === "standard" ? "px-4 pt-3 pb-3" : "px-0 py-0"}
+        contentClassName="items-center gap-3"
+        overlay={
+          waveform ? (
+            <div className="pointer-events-none absolute inset-0 z-0 opacity-80">
+              <OverviewCanvas
+                waveform={waveform}
+                duration={safeDuration}
+                bpm={displayBpm}
+                isPlaying={isPlaying}
+                baseCurrentTime={elapsedSeconds}
+                liveTimeGetter={liveTimeGetter}
+                beatOffsetSeconds={null}
+                onSeek={() => {}}
+                height={64}
+                className="absolute inset-0"
+                rounded={false}
+                showPlayhead
+              />
+              <div className="absolute inset-0 z-0 bg-gradient-to-r from-black/85 via-black/70 to-black/85" />
+            </div>
+          ) : undefined
+        }
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
       >
-        {waveform && (
-          <div className="pointer-events-none absolute inset-0 z-0 opacity-80">
-            <OverviewCanvas
-              waveform={waveform}
-              duration={safeDuration}
-              bpm={displayBpm}
-              isPlaying={isPlaying}
-              baseCurrentTime={elapsedSeconds}
-              liveTimeGetter={liveTimeGetter}
-              beatOffsetSeconds={null}
-              onSeek={() => {}}
-              height={64}
-              className="absolute inset-0"
-              rounded={false}
-              showPlayhead
-            />
-            <div className="absolute inset-0 z-0 bg-gradient-to-r from-black/85 via-black/70 to-black/85" />
-          </div>
-        )}
-
-        <div className="relative z-20 flex items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-white drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]">
-              {track.title}
-            </p>
-            <p className="truncate text-xs text-white/75 drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)]">
-              {track.artist}
-            </p>
-          </div>
-          <div className="flex flex-col items-end text-right text-[0.65rem] uppercase tracking-[0.1rem] text-white/80 drop-shadow-[0_1px_4px_rgba(0,0,0,0.9)]">
-            <span className="text-sm font-semibold text-white drop-shadow-[0_1px_4px_rgba(0,0,0,1)]">
-              {displayBpm} BPM
-            </span>
-            <span className="mt-1 inline-flex min-w-[3rem] justify-center border border-white/70 bg-white/10 px-2 py-0.5 text-xs font-semibold text-white drop-shadow-[0_1px_4px_rgba(0,0,0,1)]">
-              {track.key}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={handlePlayClick}
-            disabled={isBuffering}
-            data-player-play-control="play"
-            className="relative z-30 flex h-12 w-12 flex-none items-center justify-center bg-white text-black shadow-[0_12px_32px_rgba(0,0,0,0.65)] ring-2 ring-white transition hover:bg-white/90 hover:shadow-[0_14px_40px_rgba(0,0,0,0.7)] focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:bg-white/70 disabled:text-black/70"
-          >
-            {isBuffering ? (
-              <Loader2 className="h-5 w-5 animate-spin drop-shadow-[0_1px_3px_rgba(0,0,0,0.35)]" />
-            ) : isPlaying ? (
-              <Pause className="h-5 w-5 drop-shadow-[0_1px_3px_rgba(0,0,0,0.35)]" />
-            ) : (
-              <Play className="h-5 w-5 drop-shadow-[0_1px_3px_rgba(0,0,0,0.35)]" />
-            )}
-          </button>
+        <div className="min-w-0 flex-1 pb-0.5">
+          <p className="truncate text-sm font-semibold text-white drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]">
+            {track.title}
+          </p>
+          <p className="truncate text-xs text-white/75 drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)]">
+            {track.artist}
+          </p>
         </div>
-
-        <div className="absolute bottom-0 left-0 right-0 z-10 h-1 bg-white/20">
-          <span
-            className="block h-full bg-white"
-            style={{ width: `${progress * 100}%` }}
-          />
+        <div className="flex flex-col items-end text-right text-[0.65rem] uppercase tracking-[0.1rem] text-white/80 drop-shadow-[0_1px_4px_rgba(0,0,0,0.9)]">
+          <span className="text-sm font-semibold text-white drop-shadow-[0_1px_4px_rgba(0,0,0,1)]">
+            {displayBpm} BPM
+          </span>
+          <span className="mt-1 inline-flex min-w-[3rem] justify-center border border-white/70 bg-white/10 px-2 py-0.5 text-xs font-semibold text-white drop-shadow-[0_1px_4px_rgba(0,0,0,1)]">
+            {track.key}
+          </span>
         </div>
-        <span className="pointer-events-none absolute inset-0 z-5 bg-gradient-to-r from-white/0 via-white/0 to-white/10" />
-      </div>
+        <button
+          type="button"
+          onClick={handlePlayClick}
+          disabled={isBuffering}
+          data-player-play-control="play"
+          className="relative z-30 flex h-12 w-12 flex-none items-center justify-center bg-white text-black shadow-[0_12px_32px_rgba(0,0,0,0.65)] ring-2 ring-white transition hover:bg-white/90 hover:shadow-[0_14px_40px_rgba(0,0,0,0.7)] focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:bg-white/70 disabled:text-black/70"
+        >
+          {isBuffering ? (
+            <Loader2 className="h-5 w-5 animate-spin drop-shadow-[0_1px_3px_rgba(0,0,0,0.35)]" />
+          ) : isPlaying ? (
+            <Pause className="h-5 w-5 drop-shadow-[0_1px_3px_rgba(0,0,0,0.35)]" />
+          ) : (
+            <Play className="h-5 w-5 drop-shadow-[0_1px_3px_rgba(0,0,0,0.35)]" />
+          )}
+        </button>
+      </PlaybackSurface>
     </footer>
   );
 }
