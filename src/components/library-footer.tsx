@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import { PlayerBar } from "@/components/player-bar";
 import { TrackEditor } from "@/components/track-editor";
@@ -82,24 +82,4 @@ function LibraryFooterComponent({
   );
 }
 
-export const LibraryFooter = memo(LibraryFooterComponent, (prev, next) => {
-  return (
-    prev.track.id === next.track.id &&
-    prev.annotation === next.annotation &&
-    prev.isPlaying === next.isPlaying &&
-    prev.isBuffering === next.isBuffering &&
-    prev.elapsedSeconds === next.elapsedSeconds &&
-    prev.durationSeconds === next.durationSeconds &&
-    prev.bpmOverride === next.bpmOverride &&
-    prev.waveform === next.waveform &&
-    prev.beatOffsetSeconds === next.beatOffsetSeconds &&
-    prev.liveTimeGetter === next.liveTimeGetter &&
-    prev.activeTab === next.activeTab &&
-    prev.onTabChange === next.onTabChange &&
-    prev.onOpenFullScreen === next.onOpenFullScreen &&
-    prev.onTogglePlay === next.onTogglePlay &&
-    prev.onSkipNext === next.onSkipNext &&
-    prev.onSkipPrevious === next.onSkipPrevious &&
-    prev.extra === next.extra
-  );
-});
+export const LibraryFooter = LibraryFooterComponent;

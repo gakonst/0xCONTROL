@@ -1,4 +1,4 @@
-import { memo, type MouseEvent, type PointerEvent, useRef } from "react";
+import { type MouseEvent, type PointerEvent, useRef } from "react";
 
 import { Loader2, Pause, Play } from "lucide-react";
 
@@ -188,18 +188,4 @@ function PlayerBarComponent({
   );
 }
 
-export const PlayerBar = memo(PlayerBarComponent, (prev, next) => {
-  return (
-    prev.track.id === next.track.id &&
-    prev.isPlaying === next.isPlaying &&
-    prev.isBuffering === next.isBuffering &&
-    prev.elapsedSeconds === next.elapsedSeconds &&
-    prev.durationSeconds === next.durationSeconds &&
-    prev.bpmOverride === next.bpmOverride &&
-    prev.waveform === next.waveform &&
-    prev.beatOffsetSeconds === next.beatOffsetSeconds &&
-    prev.liveTimeGetter === next.liveTimeGetter &&
-    prev.className === next.className &&
-    prev.variant === next.variant
-  );
-});
+export const PlayerBar = PlayerBarComponent;
