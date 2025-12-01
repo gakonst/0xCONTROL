@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 
 import { PlaylistBrowser } from "@/components/playlist-browser";
 import { PlaylistCreatePanel } from "@/components/playlist-create-panel";
@@ -16,6 +16,27 @@ import type {
   PlaylistSortField,
 } from "@/components/playlist-browser";
 import type { LibraryNavigationApi } from "@/hooks/use-library-navigation";
+import { cn } from "@/lib/utils";
+
+type LayerProps = {
+  active: boolean;
+  children: ReactNode;
+  ariaHidden: boolean;
+};
+
+function Layer({ active, children, ariaHidden }: LayerProps) {
+  return (
+    <div
+      className={cn(
+        "absolute inset-0 h-full w-full transition-opacity duration-150",
+        active ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
+      )}
+      aria-hidden={ariaHidden}
+    >
+      {children}
+    </div>
+  );
+}
 
 export type LibraryViewRouterProps = {
   navigation: LibraryNavigationApi;
@@ -92,10 +113,11 @@ export function LibraryViewRouter({
 
   const isPlaylists = view.type === "playlists";
   const isCreate = view.type === "create";
+  const isTracks = !isPlaylists && !isCreate;
 
   return (
     <div className="relative h-full w-full">
-      {isPlaylists && (
+      <Layer active={isPlaylists} ariaHidden={!isPlaylists}>
         <PlaylistBrowser
           playlists={playlists}
           tracks={tracks}
@@ -109,11 +131,13 @@ export function LibraryViewRouter({
           onTogglePin={onTogglePin}
           onToggleFavorite={onToggleFavorite}
         />
-      )}
+      </Layer>
 
-      {isCreate && <PlaylistCreatePanel onPlaylistCreated={onPlaylistCreated} />}
+      <Layer active={isCreate} ariaHidden={!isCreate}>
+        <PlaylistCreatePanel onPlaylistCreated={onPlaylistCreated} />
+      </Layer>
 
-      {!isPlaylists && !isCreate && (
+      <Layer active={isTracks} ariaHidden={!isTracks}>
         <TrackList
           className="h-full w-full"
           tracks={visibleTracks}
@@ -131,7 +155,7 @@ export function LibraryViewRouter({
           annotations={annotations}
           playback={playback}
         />
-      )}
+      </Layer>
     </div>
   );
 }

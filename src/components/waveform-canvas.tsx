@@ -96,6 +96,13 @@ function WaveformCanvas({
     width: 960,
     height: height ?? (isOverview ? 88 : 320),
   });
+  const sizeRef = useRef(size);
+
+  // Keep a ref in sync so the ResizeObserver callback can compare without
+  // pulling size into its dependency array (avoids re-subscribing).
+  useEffect(() => {
+    sizeRef.current = size;
+  }, [size]);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -104,20 +111,25 @@ function WaveformCanvas({
       const entry = entries[0];
       if (!entry) return;
       const { width, height: rectHeight } = entry.contentRect;
-      const targetHeight = height ?? (isOverview
-        ? Math.max(56, Math.floor(rectHeight))
-        : Math.max(140, Math.floor(rectHeight)));
 
-      // Respect the actual measured width for tiny containers (e.g., list thumbnails)
-      // instead of forcing a 320px minimum, but fall back to a sane default when the
-      // element is hidden and reports 0.
+      const prev = sizeRef.current;
       const measuredWidth = Math.floor(width);
-      const safeWidth = measuredWidth > 0 ? measuredWidth : 320;
+      const measuredHeight = Math.floor(rectHeight);
 
-      setSize({
-        width: Math.max(1, safeWidth),
-        height: targetHeight,
-      });
+      // When the element is hidden (display: none), browsers report 0x0; keep
+      // the previous size so canvases don't thrash/re-render on tab toggles.
+      if (measuredWidth <= 1 && measuredHeight <= 1) return;
+
+      const targetHeight = height ?? (isOverview
+        ? Math.max(56, measuredHeight || prev.height)
+        : Math.max(140, measuredHeight || prev.height));
+      const targetWidth = Math.max(1, measuredWidth || prev.width);
+
+      if (targetWidth === prev.width && targetHeight === prev.height) return;
+
+      const next = { width: targetWidth, height: targetHeight };
+      sizeRef.current = next;
+      setSize(next);
     });
     observer.observe(element);
     return () => observer.disconnect();
