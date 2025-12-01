@@ -21,6 +21,7 @@ type PlayerBarProps = {
   onSkipPrevious: () => void;
   className?: string;
   onOpenFullScreen?: () => void;
+  variant?: "standard" | "bare";
 };
 
 export function PlayerBar({
@@ -37,6 +38,7 @@ export function PlayerBar({
   onSkipPrevious,
   className,
   onOpenFullScreen,
+  variant = "standard",
 }: PlayerBarProps) {
   const safeDuration = durationSeconds ?? waveform?.durationSeconds ?? 0;
   const progress =
@@ -114,10 +116,17 @@ export function PlayerBar({
     onTogglePlay();
   };
 
+  const panelClasses = cn(
+    "relative overflow-hidden text-white",
+    variant === "standard"
+      ? "bg-[rgba(2,2,6,0.98)] px-4 py-3 shadow-[0_-15px_60px_rgba(0,0,0,0.65)]"
+      : "px-0 py-0",
+  );
+
   return (
     <footer className={cn("w-full", className)}>
       <div
-        className="relative overflow-hidden bg-[rgba(2,2,6,0.98)] px-4 py-3 text-white shadow-[0_-15px_60px_rgba(0,0,0,0.65)]"
+        className={panelClasses}
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}

@@ -995,7 +995,9 @@ function App() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#010308] text-foreground">
       <div className="flex flex-1 flex-col overflow-hidden pt-4">
-        <div className="min-h-0 flex-1">
+        <div
+          className={`min-h-0 flex-1 overflow-hidden ${currentTrack ? "pb-[220px] sm:pb-[240px]" : ""}`}
+        >
           {libraryView.type === "playlists" ? (
             <PlaylistBrowser
               playlists={playlists}
@@ -1050,14 +1052,17 @@ function App() {
       </div>
 
       {currentTrack && (
-        <div className="flex flex-col pb-2 shrink-0">
+        <div className="shrink-0 border-t border-white/10 bg-[rgba(2,2,6,0.98)] text-white shadow-[0_-15px_60px_rgba(0,0,0,0.65)]">
           <TrackNotesEditor
             track={currentTrack}
             annotation={currentAnnotation}
             onChange={handleAnnotationChange}
-            className="border-b border-white/10"
+            variant="inline"
+            className="border-b border-white/10 px-4 py-2"
           />
           <PlayerBar
+            variant="bare"
+            className="px-4 py-3"
             track={currentTrack}
             isPlaying={isPlaying}
             isBuffering={isBuffering}
@@ -1073,7 +1078,9 @@ function App() {
             onSkipPrevious={goToPreviousTrack}
             onOpenFullScreen={handleOpenFullScreen}
           />
-          <LibraryTabs activeTab={activeTab} onTabChange={handleTabChange} />
+          <div className="border-t border-white/10">
+            <LibraryTabs activeTab={activeTab} onTabChange={handleTabChange} />
+          </div>
         </div>
       )}
       {isFullScreenPlayerOpen && currentTrack && (
