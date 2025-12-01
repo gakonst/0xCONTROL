@@ -48,13 +48,24 @@ export function PlayerBar({
     bpmOverride !== null && bpmOverride !== undefined
       ? Math.round(bpmOverride)
       : track.bpm;
-  const swipeStartRef = useRef<number | null>(null);
+  const swipeStartXRef = useRef<number | null>(null);
+  const swipeStartYRef = useRef<number | null>(null);
   const swipePointerRef = useRef<number | null>(null);
+  const swipeConsumedRef = useRef(false);
+  const gestureLockRef = useRef<"horizontal" | "vertical" | null>(null);
+  const hasExceededTapSlopRef = useRef(false);
   const ignoreOpenRef = useRef(false);
 
+  const TAP_SLOP_PX = 8;
+  const SWIPE_TRIGGER_PX = 64;
+
   const resetSwipe = () => {
-    swipeStartRef.current = null;
+    swipeStartXRef.current = null;
+    swipeStartYRef.current = null;
     swipePointerRef.current = null;
+    swipeConsumedRef.current = false;
+    gestureLockRef.current = null;
+    hasExceededTapSlopRef.current = false;
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -69,8 +80,12 @@ export function PlayerBar({
       return;
     }
 
-    swipeStartRef.current = event.clientX;
+    swipeStartXRef.current = event.clientX;
+    swipeStartYRef.current = event.clientY;
     swipePointerRef.current = event.pointerId;
+    swipeConsumedRef.current = false;
+    gestureLockRef.current = null;
+    hasExceededTapSlopRef.current = false;
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -79,6 +94,53 @@ export function PlayerBar({
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     resetSwipe();
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (
+      swipePointerRef.current === null ||
+      event.pointerId !== swipePointerRef.current ||
+      swipeStartXRef.current === null ||
+      swipeStartYRef.current === null
+    ) {
+      return;
+    }
+
+    const deltaX = event.clientX - swipeStartXRef.current;
+    const deltaY = event.clientY - swipeStartYRef.current;
+
+    if (
+      !hasExceededTapSlopRef.current &&
+      (Math.abs(deltaX) > TAP_SLOP_PX || Math.abs(deltaY) > TAP_SLOP_PX)
+    ) {
+      hasExceededTapSlopRef.current = true;
+    }
+
+    if (!gestureLockRef.current && hasExceededTapSlopRef.current) {
+      gestureLockRef.current =
+        Math.abs(deltaX) >= Math.abs(deltaY) ? "horizontal" : "vertical";
+
+      // Let vertical scroll behave normally once we know it's not a swipe.
+      if (
+        gestureLockRef.current === "vertical" &&
+        event.currentTarget.hasPointerCapture(event.pointerId)
+      ) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    }
+
+    if (
+      gestureLockRef.current === "horizontal" &&
+      !swipeConsumedRef.current &&
+      Math.abs(deltaX) >= SWIPE_TRIGGER_PX
+    ) {
+      if (deltaX > 0) {
+        onSkipPrevious();
+      } else {
+        onSkipNext();
+      }
+      swipeConsumedRef.current = true;
+    }
   };
 
   const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
@@ -92,21 +154,29 @@ export function PlayerBar({
     ) {
       return;
     }
-    if (swipeStartRef.current === null) return;
+    if (swipeStartXRef.current === null || swipeStartYRef.current === null) return;
 
-    const startX = swipeStartRef.current ?? event.clientX;
-    const deltaX = event.clientX - startX;
-    const threshold = 60;
-    let didSwipe = false;
-    if (deltaX <= -threshold) {
-      onSkipNext();
-      didSwipe = true;
-    } else if (deltaX >= threshold) {
-      onSkipPrevious();
-      didSwipe = true;
+    const deltaX = event.clientX - swipeStartXRef.current;
+    const deltaY = event.clientY - swipeStartYRef.current;
+    const locked = gestureLockRef.current;
+
+    if (!swipeConsumedRef.current && locked === "horizontal") {
+      if (Math.abs(deltaX) >= SWIPE_TRIGGER_PX) {
+        if (deltaX > 0) {
+          onSkipPrevious();
+        } else {
+          onSkipNext();
+        }
+        swipeConsumedRef.current = true;
+      }
     }
+
+    const actedOnSwipe = swipeConsumedRef.current;
+    const consideredTap = !hasExceededTapSlopRef.current && !actedOnSwipe;
+
     resetSwipe();
-    if (!didSwipe && !ignoreOpenRef.current) {
+
+    if (consideredTap && !ignoreOpenRef.current) {
       onOpenFullScreen?.();
     }
     ignoreOpenRef.current = false;
@@ -147,6 +217,7 @@ export function PlayerBar({
           ) : undefined
         }
         onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
       >
