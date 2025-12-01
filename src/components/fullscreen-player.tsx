@@ -1,11 +1,4 @@
-import {
-  type PointerEvent,
-  type RefObject,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 
 import { ChevronDown } from "lucide-react";
 
@@ -14,6 +7,7 @@ import { FullPlayerBottom } from "@/components/full-player-bottom";
 import { TrackEditor } from "@/components/track-editor";
 import { LibraryTabs, type LibraryTabKey } from "@/components/library-tabs";
 import { Track } from "@/data/tracks";
+import { ScreenHeader } from "@/components/screen-header";
 import { parseDurationToSeconds } from "@/lib/time";
 import type { WaveformData } from "@/lib/waveform";
 import type { TrackAnnotation } from "@/types/annotations";
@@ -90,9 +84,6 @@ export function FullScreenPlayer({
     [],
   );
 
-  const swipeStartRef = useRef<number | null>(null);
-  const swipePointerRef = useRef<number | null>(null);
-
   useEffect(() => {
     const computeHeights = () => {
       const width = window.innerWidth;
@@ -133,47 +124,8 @@ export function FullScreenPlayer({
     };
   }, []);
 
-  const resetSwipe = () => {
-    swipeStartRef.current = null;
-    swipePointerRef.current = null;
-  };
-
-  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    swipeStartRef.current = event.clientY;
-    swipePointerRef.current = event.pointerId;
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-
-  const handlePointerCancel = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    resetSwipe();
-  };
-
-  const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-
-    if (
-      swipePointerRef.current !== null &&
-      event.pointerId !== swipePointerRef.current
-    ) {
-      return;
-    }
-    if (swipeStartRef.current === null) return;
-
-    const deltaY = event.clientY - swipeStartRef.current;
-    const threshold = 80;
-    if (deltaY >= threshold) {
-      onClose();
-    }
-    resetSwipe();
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-gradient-to-b from-black via-[#100b1b] to-[#010308] text-white">
+    <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-background text-white">
       <div className="absolute inset-0 -z-10 opacity-40">
         {track.cover ? (
           <img
@@ -182,30 +134,22 @@ export function FullScreenPlayer({
             className="h-full w-full object-cover blur-3xl"
           />
         ) : (
-          <div className="h-full w-full bg-gradient-to-b from-black to-[#010308]" />
+          <div className="h-full w-full bg-background" />
         )}
       </div>
-      <div
-        className="flex w-full justify-center px-4 pt-4"
-        onPointerDown={handlePointerDown}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerCancel}
-      >
-        <div className="h-1.5 w-16 rounded-full bg-white/40" />
-      </div>
-
-      <header className="flex items-center justify-between px-4 pt-6 text-xs uppercase tracking-[0.2rem] text-white/70">
-        <button
-          type="button"
-          onClick={onClose}
-          className="flex h-10 w-10 items-center justify-center rounded-full border border-white/30 bg-black/40"
-          aria-label="Close player"
-        >
-          <ChevronDown className="h-5 w-5" />
-        </button>
-        <span>Now Playing</span>
-        <div className="h-10 w-10" />
-      </header>
+      <ScreenHeader
+        title="Now Playing"
+        trailing={
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/30 bg-black/40 text-white/80 transition hover:border-white/50 hover:text-white"
+            aria-label="Close player"
+          >
+            <ChevronDown className="h-5 w-5" />
+          </button>
+        }
+      />
 
       <div
         className="flex w-full flex-1 flex-col items-center gap-3 overflow-y-auto px-3 pt-5 text-center sm:gap-4 md:gap-5 md:px-5"
@@ -234,7 +178,7 @@ export function FullScreenPlayer({
             </div>
           ) : (
             <div
-              className="flex w-full items-center justify-center bg-gradient-to-b from-white/5 to-white/0"
+              className="flex w-full items-center justify-center bg-black/20"
               style={{ height: canvasHeights.detail }}
             >
               {track.cover ? (

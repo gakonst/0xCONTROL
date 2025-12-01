@@ -48,9 +48,6 @@ export function PlaybackSurface({
         />
       </div>
 
-      {background === "solid" && (
-        <span className="pointer-events-none absolute inset-0 z-5 bg-gradient-to-r from-white/0 via-white/0 to-white/10" />
-      )}
     </div>
   );
 }

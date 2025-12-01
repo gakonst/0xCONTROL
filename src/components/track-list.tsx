@@ -248,7 +248,7 @@ export function TrackList({
   return (
     <section
       className={cn(
-        "flex h-full flex-col overflow-hidden overflow-x-hidden bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_rgba(3,7,18,0.95))] shadow-[0_25px_120px_rgba(3,7,18,0.85)] backdrop-blur",
+        "flex h-full flex-col overflow-hidden overflow-x-hidden bg-background shadow-[0_25px_120px_rgba(3,7,18,0.85)] backdrop-blur",
         className,
       )}
     >

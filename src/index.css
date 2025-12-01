@@ -6,7 +6,7 @@
 
 @layer base {
     :root {
-        --background: 230 60% 2.5%;
+        --background: 240 50% 4%;
         --foreground: 210 40% 98%;
         --card: 228 32% 7%;
         --card-foreground: 210 40% 98%;
@@ -39,17 +39,6 @@
         @apply min-h-screen bg-background text-foreground antialiased;
         overflow: hidden;
         font-family: var(--font-sans);
-        background-image:
-            radial-gradient(
-                circle at 10% 20%,
-                rgba(78, 176, 243, 0.18),
-                transparent 40%
-            ),
-            radial-gradient(
-                circle at 80% 0%,
-                rgba(244, 114, 182, 0.12),
-                transparent 45%
-            ),
-            linear-gradient(180deg, #010308 0%, #020617 45%, #050505 100%);
+        background-color: hsl(var(--background));
     }
 }

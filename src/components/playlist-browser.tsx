@@ -321,7 +321,7 @@ export function PlaylistBrowser({
   }
 
   return (
-    <section className="flex h-full flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_rgba(3,7,18,0.95))] shadow-[0_25px_120px_rgba(3,7,18,0.85)] backdrop-blur">
+    <section className="flex h-full flex-col overflow-hidden bg-background shadow-[0_25px_120px_rgba(3,7,18,0.85)] backdrop-blur">
       <LibraryHeader
         title="Playlists"
         stats={statsParts}

@@ -47,6 +47,7 @@ export function FullPlayerBottom({
       <PlaybackSurface
         progress={progress}
         contentClassName="items-center justify-center gap-3"
+        background="transparent"
       >
         <button
           type="button"

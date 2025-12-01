@@ -157,7 +157,7 @@ export function WaveformPreview() {
   const hasWaveform = waveform && waveform.bars.length > 0;
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-b from-[#05070f] via-[#0a0f1d] to-black text-white">
+    <div className="min-h-screen w-full bg-background text-white">
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-8">
         <header className="flex flex-col gap-2">
           <p className="text-sm uppercase tracking-[0.25em] text-slate-400">Waveform Lab</p>
