@@ -325,7 +325,6 @@ function FullScreenBottomPanel({
           onChange={(update) => onAnnotationChange?.(update)}
         />
         <FullPlayerBottom
-          variant="inline"
           isPlaying={isPlaying}
           isBuffering={isBuffering}
           elapsedSeconds={elapsedSeconds}

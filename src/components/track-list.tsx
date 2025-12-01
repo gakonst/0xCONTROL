@@ -1,4 +1,5 @@
 import {
+  memo,
   useMemo,
   useRef,
   useState,
@@ -12,7 +13,8 @@ import { cn } from "@/lib/utils";
 import { LibraryHeader } from "@/components/library-header";
 import { OverviewCanvas } from "@/components/waveform-canvas";
 import { useWaveform } from "@/hooks/use-waveform";
-import { formatSecondsToClock, parseDurationToSeconds } from "@/lib/time";
+import { useOnScreen } from "@/hooks/use-on-screen";
+import { formatSecondsToClock } from "@/lib/time";
 
 export type TrackSortField = "title" | "bpm" | "key" | null;
 export type TrackSortDirection = "asc" | "desc";
@@ -315,7 +317,9 @@ export function TrackList({
             }
             quickAddLabel={quickAddLabel}
             quickRemoveLabel={quickRemoveLabel}
-            playback={playback}
+            playback={
+              playback?.trackId === track.id ? playback : undefined
+            }
           />
         ))}
       </div>
@@ -340,7 +344,7 @@ type TrackListRowProps = {
   };
 };
 
-function TrackListRow({
+const TrackListRow = memo(function TrackListRow({
   track,
   isActive,
   onSelect,
@@ -352,6 +356,7 @@ function TrackListRow({
 }: TrackListRowProps) {
   const [dragOffset, setDragOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const rowRef = useRef<HTMLDivElement | null>(null);
   const pointerIdRef = useRef<number | null>(null);
   const startXRef = useRef(0);
   const suppressClickRef = useRef(false);
@@ -363,7 +368,10 @@ function TrackListRow({
     track.title.charAt(0).toUpperCase() ||
     track.artist.charAt(0).toUpperCase() ||
     "?";
-  const { data: waveformAnalysis } = useWaveform(track.id);
+  const isVisible = useOnScreen(rowRef, { rootMargin: "256px" });
+  const { data: waveformAnalysis } = useWaveform(track.id, {
+    enabled: isVisible || isActive,
+  });
   const waveform = waveformAnalysis?.waveform ?? null;
   const isRowActive = playback?.trackId === track.id;
   const durationSeconds = waveform?.durationSeconds;
@@ -476,7 +484,7 @@ function TrackListRow({
   })();
 
   return (
-    <div className="relative overflow-hidden">
+    <div ref={rowRef} className="relative overflow-hidden">
       {(canAdd || canRemove) && (
         <>
           <div className="pointer-events-none absolute inset-0 flex overflow-hidden">
@@ -592,7 +600,7 @@ function TrackListRow({
       </button>
     </div>
   );
-}
+});
 
 type BpmComparisonOperator = ">" | "<" | ">=" | "<=" | "=";
 

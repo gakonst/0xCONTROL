@@ -16,6 +16,7 @@ type PlayerBarProps = {
   durationSeconds?: number | null;
   bpmOverride?: number | null;
   waveform?: WaveformData | null;
+  beatOffsetSeconds?: number | null;
   liveTimeGetter?: () => number;
   onTogglePlay: () => void;
   onSkipNext: () => void;
@@ -25,7 +26,7 @@ type PlayerBarProps = {
   variant?: "standard" | "bare";
 };
 
-export function PlayerBar({
+function PlayerBarComponent({
   track,
   isPlaying,
   isBuffering,
@@ -33,6 +34,7 @@ export function PlayerBar({
   durationSeconds,
   bpmOverride,
   waveform,
+  beatOffsetSeconds,
   liveTimeGetter,
   onTogglePlay,
   onSkipNext,
@@ -205,7 +207,7 @@ export function PlayerBar({
                 isPlaying={isPlaying}
                 baseCurrentTime={elapsedSeconds}
                 liveTimeGetter={liveTimeGetter}
-                beatOffsetSeconds={null}
+                beatOffsetSeconds={beatOffsetSeconds ?? null}
                 onSeek={() => {}}
                 height={64}
                 className="absolute inset-0"
@@ -256,3 +258,5 @@ export function PlayerBar({
     </footer>
   );
 }
+
+export const PlayerBar = PlayerBarComponent;
