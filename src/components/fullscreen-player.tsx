@@ -255,11 +255,12 @@ export function FullScreenPlayer({
         </div>
 
         <div className="w-full max-w-xl">
-          <p className="truncate text-2xl font-semibold">{track.title}</p>
-          <p className="mt-1 truncate text-base text-white/70">
-            {track.artist}
+          <p className="truncate text-[15px] font-semibold leading-tight sm:text-lg">
+            <span className="text-white">{track.title}</span>
+            <span className="mx-2 text-white/50">•</span>
+            <span className="text-white/70">{track.artist}</span>
           </p>
-          <p className="mt-2 text-xs uppercase tracking-[0.2rem] text-white/60">
+          <p className="mt-1 text-[10px] uppercase tracking-[0.16rem] text-white/60 sm:text-[11px]">
             {displayBpm} BPM • {track.key}
           </p>
         </div>
