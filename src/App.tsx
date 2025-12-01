@@ -87,6 +87,8 @@ function App() {
   const [annotations, setAnnotations] = useState<
     Record<string, TrackAnnotation>
   >({});
+  const footerRef = useRef<HTMLDivElement | null>(null);
+  const [footerHeight, setFooterHeight] = useState(0);
   const [libraryView, setLibraryView] = useState<LibraryView>(
     initialUrlState.view,
   );
@@ -992,11 +994,27 @@ function App() {
     };
   }, [flushAllPendingNoteUpdates]);
 
+  useEffect(() => {
+    const measure = () => {
+      const h = footerRef.current?.offsetHeight ?? 0;
+      setFooterHeight(h);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (footerRef.current) observer.observe(footerRef.current);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#010308] text-foreground">
       <div className="flex flex-1 flex-col overflow-hidden pt-4">
         <div
-          className={`min-h-0 flex-1 overflow-hidden ${currentTrack ? "pb-[220px] sm:pb-[240px]" : ""}`}
+          className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto touch-pan-y overscroll-y-contain"
+          style={{ paddingBottom: footerHeight ? footerHeight + 16 : undefined }}
         >
           {libraryView.type === "playlists" ? (
             <PlaylistBrowser
@@ -1052,7 +1070,10 @@ function App() {
       </div>
 
       {currentTrack && (
-        <div className="shrink-0 border-t border-white/10 bg-[rgba(2,2,6,0.98)] text-white shadow-[0_-15px_60px_rgba(0,0,0,0.65)]">
+        <div
+          ref={footerRef}
+          className="shrink-0 border-t border-white/10 bg-[rgba(2,2,6,0.98)] text-white shadow-[0_-15px_60px_rgba(0,0,0,0.65)]"
+        >
           <TrackNotesEditor
             track={currentTrack}
             annotation={currentAnnotation}

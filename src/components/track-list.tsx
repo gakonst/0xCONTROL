@@ -236,7 +236,7 @@ export function TrackList({
   return (
     <section
       className={cn(
-        "flex h-full flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_rgba(3,7,18,0.95))] shadow-[0_25px_120px_rgba(3,7,18,0.85)] backdrop-blur",
+        "flex h-full flex-col overflow-hidden overflow-x-hidden bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.05),_rgba(3,7,18,0.95))] shadow-[0_25px_120px_rgba(3,7,18,0.85)] backdrop-blur",
         className,
       )}
     >
@@ -265,7 +265,7 @@ export function TrackList({
         extraControls={extraControls}
       />
 
-      <div className="flex-1 overflow-auto pb-6">
+      <div className="flex-1 overflow-auto overflow-x-hidden pb-6">
         {showFullBackRow && header?.onBack && (
           <button
             type="button"
@@ -449,7 +449,7 @@ function TrackListRow({
     : 0;
 
   return (
-    <div className="relative">
+    <div className="relative overflow-hidden">
       {(canAdd || canRemove) && (
         <>
           <div className="pointer-events-none absolute inset-0 flex overflow-hidden">

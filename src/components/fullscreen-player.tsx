@@ -372,7 +372,7 @@ function FullScreenBottomPanel({
   return (
     <div ref={bottomRef} className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-0 pb-0">
       <div
-        className={`w-full overflow-hidden bg-[rgba(2,2,6,0.98)] text-white shadow-[0_-15px_60px_rgba(0,0,0,0.65)] ${interactive ? "pointer-events-auto" : "pointer-events-none"}`}
+        className={`w-full overflow-visible bg-[rgba(2,2,6,0.98)] text-white shadow-[0_-15px_60px_rgba(0,0,0,0.65)] ${interactive ? "pointer-events-auto" : "pointer-events-none"}`}
       >
         <TrackNotesEditor
           track={track}
