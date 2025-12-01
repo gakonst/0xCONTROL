@@ -7,6 +7,7 @@ import {
 } from "react";
 
 import { Track } from "@/data/tracks";
+import type { TrackAnnotation } from "@/types/annotations";
 import { cn } from "@/lib/utils";
 import { LibraryHeader } from "@/components/library-header";
 import { OverviewCanvas } from "@/components/waveform-canvas";
@@ -32,6 +33,7 @@ type TrackListProps = {
   onQuickAddToPlaylist?: QuickActionHandler;
   quickRemoveLabel?: string;
   onQuickRemoveFromPlaylist?: QuickActionHandler;
+  annotations?: Record<string, TrackAnnotation>;
   playback?: {
     trackId: string;
     isPlaying: boolean;
@@ -84,8 +86,10 @@ export function TrackList({
   onQuickAddToPlaylist,
   quickRemoveLabel,
   onQuickRemoveFromPlaylist,
+  annotations,
   playback,
 }: TrackListProps) {
+  const annotationMap = annotations ?? {};
   const [searchQuery, setSearchQuery] = useState("");
   const [uncontrolledSortField, setUncontrolledSortField] =
     useState<TrackSortField>(null);
@@ -115,12 +119,20 @@ export function TrackList({
     [searchQuery],
   );
 
+  const annotatedTracks = useMemo(() => {
+    if (!annotations || Object.keys(annotationMap).length === 0) return tracks;
+    return tracks.map((track) => {
+      const override = annotationMap[track.id];
+      return override ? { ...track, annotation: override } : track;
+    });
+  }, [tracks, annotationMap, annotations]);
+
   const filteredTracks = useMemo(() => {
-    if (!searchCriteria.hasFilters) return tracks;
-    return tracks.filter((track) =>
+    if (!searchCriteria.hasFilters) return annotatedTracks;
+    return annotatedTracks.filter((track) =>
       matchesSearchCriteria(track, searchCriteria),
     );
-  }, [tracks, searchCriteria]);
+  }, [annotatedTracks, searchCriteria]);
 
   const sortedTracks = useMemo(() => {
     if (!sortField) return filteredTracks;
@@ -146,7 +158,7 @@ export function TrackList({
 
   const totalDurationLabel = formatTotalDuration(sortedTracks);
   const isFilteredView =
-    searchCriteria.hasFilters || sortedTracks.length !== tracks.length;
+    searchCriteria.hasFilters || sortedTracks.length !== annotatedTracks.length;
 
   const updateSort = (field: TrackSortField, direction: TrackSortDirection) => {
     if (isSortControlled) {
@@ -448,6 +460,21 @@ function TrackListRow({
     ? Math.min(Math.max(-dragOffset / actionThreshold, 0), 1)
     : 0;
 
+  const colorClass = (() => {
+    switch (track.annotation?.color) {
+      case "red":
+        return "bg-red-500";
+      case "blue":
+        return "bg-blue-500";
+      case "pink":
+        return "bg-pink-500";
+      case "cyan":
+        return "bg-cyan-400";
+      default:
+        return "bg-white/20";
+    }
+  })();
+
   return (
     <div className="relative overflow-hidden">
       {(canAdd || canRemove) && (
@@ -539,11 +566,21 @@ function TrackListRow({
         </div>
 
         <div className="ml-auto flex w-[110px] flex-shrink-0 flex-col items-end text-right md:w-[120px]">
-          <span className="truncate text-sm font-semibold tracking-tight text-foreground md:text-base">
-            {displayBpm} BPM
+          <span className="flex items-center gap-2 truncate text-sm font-semibold tracking-tight text-foreground md:text-base">
+            <span
+              className={cn(
+                "inline-block h-3 w-3 rounded-sm border border-white/30",
+                colorClass,
+              )}
+              aria-hidden="true"
+            />
+            <span className="flex items-baseline gap-1">
+              <span className="tabular-nums">{displayBpm}</span>
+              <span className="text-[0.7rem] md:text-[0.75rem] uppercase">BPM</span>
+            </span>
           </span>
           <div className="mt-0.5 flex items-center justify-end gap-1.5 text-xs text-muted-foreground md:text-sm">
-            <span className="inline-flex w-8 justify-center rounded-none border border-white/60 bg-white/80 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-tight text-black/80 md:text-xs">
+            <span className="inline-flex w-10 justify-center rounded-none border border-white/60 bg-white/80 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-tight text-black/80 md:text-xs">
               {track.key}
             </span>
             <span className="text-[0.7rem] md:text-xs">

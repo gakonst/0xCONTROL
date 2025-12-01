@@ -11,7 +11,7 @@ import { ChevronDown } from "lucide-react";
 
 import { DetailCanvas, OverviewCanvas } from "@/components/waveform-canvas";
 import { FullPlayerBottom } from "@/components/full-player-bottom";
-import { TrackNotesEditor } from "@/components/track-notes-editor";
+import { TrackEditor } from "@/components/track-editor";
 import { LibraryTabs, type LibraryTabKey } from "@/components/library-tabs";
 import { Track } from "@/data/tracks";
 import { parseDurationToSeconds } from "@/lib/time";
@@ -372,14 +372,12 @@ function FullScreenBottomPanel({
   return (
     <div ref={bottomRef} className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-0 pb-0">
       <div
-        className={`w-full overflow-visible bg-[rgba(2,2,6,0.98)] text-white shadow-[0_-15px_60px_rgba(0,0,0,0.65)] ${interactive ? "pointer-events-auto" : "pointer-events-none"}`}
+        className={`w-full overflow-visible border-t border-white/10 bg-[rgba(2,2,6,0.98)] text-white shadow-[0_-15px_60px_rgba(0,0,0,0.65)] ${interactive ? "pointer-events-auto" : "pointer-events-none"}`}
       >
-        <TrackNotesEditor
+        <TrackEditor
           track={track}
           annotation={annotation}
           onChange={(update) => onAnnotationChange?.(update)}
-          className="border-b border-white/10 px-4 py-2"
-          variant="inline"
         />
         <FullPlayerBottom
           variant="inline"
@@ -392,9 +390,10 @@ function FullScreenBottomPanel({
           onSkipNext={onSkipNext}
           onSkipPrevious={onSkipPrevious}
           onSeek={onSeek}
-          className="border-t border-white/10"
         />
-        <LibraryTabs activeTab={activeTab} onTabChange={onTabChange} />
+        <div className="border-t border-white/10">
+          <LibraryTabs activeTab={activeTab} onTabChange={onTabChange} />
+        </div>
       </div>
     </div>
   );
