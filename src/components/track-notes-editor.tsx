@@ -20,6 +20,7 @@ type TrackNotesEditorProps = {
   annotation?: TrackAnnotation;
   onChange: (update: Partial<TrackAnnotation>) => void;
   className?: string;
+  variant?: "default" | "inline";
 };
 
 export function TrackNotesEditor({
@@ -27,6 +28,7 @@ export function TrackNotesEditor({
   annotation,
   onChange,
   className,
+  variant = "default",
 }: TrackNotesEditorProps) {
   const selectedColor = annotation?.color ?? null;
   const noteValue = annotation?.note ?? "";
@@ -44,9 +46,14 @@ export function TrackNotesEditor({
     setIsPaletteOpen(false);
   };
 
+  const containerClasses =
+    variant === "inline"
+      ? "relative bg-transparent px-0 py-0 text-white"
+      : "relative border-t border-white/10 bg-[rgba(18,18,18,0.98)] px-3 py-1 text-white shadow-[0_-15px_60px_rgba(0,0,0,0.35)]";
+
   return (
     <section className={cn("w-full", className)} aria-label="Track annotations">
-      <div className="relative border-t border-white/10 bg-[rgba(18,18,18,0.98)] px-3 py-1 text-white shadow-[0_-15px_60px_rgba(0,0,0,0.35)]">
+      <div className={containerClasses}>
         <div className="flex items-center gap-3">
           <div className="relative flex w-[48px] justify-center pl-2">
             <label htmlFor="track-note-color" className="sr-only">
@@ -67,7 +74,7 @@ export function TrackNotesEditor({
               disabled={!hasSelection}
             />
             {isPaletteOpen && hasSelection && (
-              <div className="absolute bottom-[calc(100%+0.25rem)] left-full ml-2 z-10 w-32 border border-white/20 bg-black/90 p-1 shadow-lg">
+              <div className="absolute bottom-[calc(100%+0.25rem)] left-full ml-2 z-[99] w-32 border border-white/20 bg-black/90 p-1 shadow-lg">
                 <button
                   type="button"
                   onClick={() => handleColorSelect(null)}

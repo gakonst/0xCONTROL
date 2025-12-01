@@ -1,5 +1,6 @@
 import {
   type PointerEvent,
+  type RefObject,
   useEffect,
   useMemo,
   useRef,
@@ -10,9 +11,12 @@ import { ChevronDown } from "lucide-react";
 
 import { DetailCanvas, OverviewCanvas } from "@/components/waveform-canvas";
 import { FullPlayerBottom } from "@/components/full-player-bottom";
+import { TrackEditor } from "@/components/track-editor";
+import { LibraryTabs, type LibraryTabKey } from "@/components/library-tabs";
 import { Track } from "@/data/tracks";
 import { parseDurationToSeconds } from "@/lib/time";
 import type { WaveformData } from "@/lib/waveform";
+import type { TrackAnnotation } from "@/types/annotations";
 
 type FullScreenPlayerProps = {
   track: Track;
@@ -29,6 +33,10 @@ type FullScreenPlayerProps = {
   onSkipPrevious: () => void;
   onClose: () => void;
   onSeek: (seconds: number) => void;
+  annotation?: TrackAnnotation;
+  onAnnotationChange?: (update: Partial<TrackAnnotation>) => void;
+  activeTab: LibraryTabKey;
+  onTabChange: (tab: LibraryTabKey) => void;
 };
 
 export function FullScreenPlayer({
@@ -46,7 +54,14 @@ export function FullScreenPlayer({
   onSkipPrevious,
   onClose,
   onSeek,
+  annotation,
+  onAnnotationChange,
+  activeTab,
+  onTabChange,
 }: FullScreenPlayerProps) {
+  const [controlsInteractive, setControlsInteractive] = useState(false);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const [bottomInset, setBottomInset] = useState(200);
   const [canvasHeights, setCanvasHeights] = useState({
     detail: 170,
     overview: 54,
@@ -60,7 +75,6 @@ export function FullScreenPlayer({
     waveformBpm !== null && waveformBpm !== undefined && waveformBpm > 0
       ? waveformBpm
       : track.bpm ?? 120;
-  const secondsPerBar = (60 / Math.max(safeBpm, 1)) * 4;
   const displayBpm =
     waveformBpm !== null && waveformBpm !== undefined
       ? Math.round(waveformBpm)
@@ -96,6 +110,27 @@ export function FullScreenPlayer({
     computeHeights();
     window.addEventListener("resize", computeHeights);
     return () => window.removeEventListener("resize", computeHeights);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setControlsInteractive(true), 280);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const measure = () => {
+      const h = bottomRef.current?.offsetHeight ?? 0;
+      setBottomInset(h > 0 ? h + 12 : 200);
+    };
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    if (bottomRef.current) observer.observe(bottomRef.current);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
   }, []);
 
   const resetSwipe = () => {
@@ -138,7 +173,7 @@ export function FullScreenPlayer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-gradient-to-b from-black via-[#100b1b] to-[#010308] text-white">
+    <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-gradient-to-b from-black via-[#100b1b] to-[#010308] text-white">
       <div className="absolute inset-0 -z-10 opacity-40">
         {track.cover ? (
           <img
@@ -172,10 +207,16 @@ export function FullScreenPlayer({
         <div className="h-10 w-10" />
       </header>
 
-      <div className="flex w-full flex-1 flex-col items-center gap-3 px-3 pb-40 pt-5 text-center sm:gap-4 sm:pb-44 md:gap-5 md:px-5">
-        <div className="w-full max-w-4xl overflow-hidden rounded-2xl bg-black/35 shadow-[0_25px_80px_rgba(0,0,0,0.65)] backdrop-blur px-3 py-4 md:px-4">
+      <div
+        className="flex w-full flex-1 flex-col items-center gap-3 overflow-y-auto px-3 pt-5 text-center sm:gap-4 md:gap-5 md:px-5"
+        style={{ paddingBottom: bottomInset }}
+      >
+        <div className="w-full overflow-hidden rounded-2xl bg-black/35 shadow-[0_25px_80px_rgba(0,0,0,0.65)] backdrop-blur px-3 py-4 md:px-4 overscroll-none">
           {waveform ? (
-            <div style={{ height: canvasHeights.detail }} className="w-full">
+            <div
+              style={{ height: canvasHeights.detail }}
+              className="w-full touch-none overscroll-none"
+            >
               <DetailCanvas
                 waveform={waveform}
                 duration={safeDuration}
@@ -223,14 +264,17 @@ export function FullScreenPlayer({
           </p>
         </div>
 
-        <div className="w-full max-w-4xl space-y-2">
+        <div className="w-full space-y-2 overscroll-none">
           <div className="flex items-center justify-between text-[11px] text-white/70 sm:text-xs">
             <span>{formatTime(elapsedSeconds)}</span>
             <span>{formatTime(safeDuration)}</span>
           </div>
-          <div className="rounded-xl bg-black/30 p-1.5 sm:p-2">
+          <div className="rounded-xl bg-black/30 p-1.5 sm:p-2 overscroll-none">
             {waveform ? (
-              <div style={{ height: canvasHeights.overview }} className="w-full">
+              <div
+                style={{ height: canvasHeights.overview }}
+                className="w-full touch-none overscroll-none"
+              >
                 <OverviewCanvas
                   waveform={waveform}
                   duration={safeDuration}
@@ -265,7 +309,10 @@ export function FullScreenPlayer({
           </div>
         </div>
 
-        <FullPlayerBottom
+        <FullScreenBottomPanel
+          track={track}
+          annotation={annotation}
+          onAnnotationChange={onAnnotationChange}
           isPlaying={isPlaying}
           isBuffering={isBuffering}
           elapsedSeconds={elapsedSeconds}
@@ -275,7 +322,78 @@ export function FullScreenPlayer({
           onSkipNext={onSkipNext}
           onSkipPrevious={onSkipPrevious}
           onSeek={onSeek}
+          activeTab={activeTab}
+          onTabChange={onTabChange}
+          interactive={controlsInteractive}
+          bottomRef={bottomRef}
         />
+      </div>
+    </div>
+  );
+}
+
+type FullScreenBottomPanelProps = {
+  track: Track;
+  annotation?: TrackAnnotation;
+  onAnnotationChange?: (update: Partial<TrackAnnotation>) => void;
+  isPlaying: boolean;
+  isBuffering: boolean;
+  elapsedSeconds: number;
+  durationSeconds: number;
+  bpm: number;
+  onTogglePlay: () => void;
+  onSkipNext: () => void;
+  onSkipPrevious: () => void;
+  onSeek: (seconds: number) => void;
+  activeTab: LibraryTabKey;
+  onTabChange: (tab: LibraryTabKey) => void;
+  interactive: boolean;
+  bottomRef: RefObject<HTMLDivElement>;
+};
+
+function FullScreenBottomPanel({
+  track,
+  annotation,
+  onAnnotationChange,
+  isPlaying,
+  isBuffering,
+  elapsedSeconds,
+  durationSeconds,
+  bpm,
+  onTogglePlay,
+  onSkipNext,
+  onSkipPrevious,
+  onSeek,
+  activeTab,
+  onTabChange,
+  interactive,
+  bottomRef,
+}: FullScreenBottomPanelProps) {
+  return (
+    <div ref={bottomRef} className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-0 pb-0">
+      <div
+        className={`w-full overflow-visible border-t border-white/10 bg-[rgba(2,2,6,0.98)] text-white shadow-[0_-15px_60px_rgba(0,0,0,0.65)] ${interactive ? "pointer-events-auto" : "pointer-events-none"}`}
+      >
+        <TrackEditor
+          track={track}
+          annotation={annotation}
+          onChange={(update) => onAnnotationChange?.(update)}
+        />
+        <FullPlayerBottom
+          variant="inline"
+          isPlaying={isPlaying}
+          isBuffering={isBuffering}
+          elapsedSeconds={elapsedSeconds}
+          durationSeconds={durationSeconds}
+          bpm={bpm}
+          onTogglePlay={onTogglePlay}
+          onSkipNext={onSkipNext}
+          onSkipPrevious={onSkipPrevious}
+          onSeek={onSeek}
+        />
+        <div className="border-t border-white/10">
+          <LibraryTabs activeTab={activeTab} onTabChange={onTabChange} />
+        </div>
       </div>
     </div>
   );

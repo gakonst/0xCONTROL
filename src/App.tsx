@@ -16,7 +16,7 @@ import {
   type TrackSortDirection,
   type TrackSortField,
 } from "@/components/track-list";
-import { TrackNotesEditor } from "@/components/track-notes-editor";
+import { TrackEditor } from "@/components/track-editor";
 import {
   PlaylistBrowser,
   type PlaylistSortDirection,
@@ -995,7 +995,9 @@ function App() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#010308] text-foreground">
       <div className="flex flex-1 flex-col overflow-hidden pt-4">
-        <div className="min-h-0 flex-1">
+        <div
+          className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto touch-pan-y overscroll-y-contain"
+        >
           {libraryView.type === "playlists" ? (
             <PlaylistBrowser
               playlists={playlists}
@@ -1036,6 +1038,7 @@ function App() {
                       removeTrackFromPlaylist(activePlaylist.id, trackId)
                   : undefined
               }
+              annotations={annotations}
               playback={{
                 trackId: currentTrack?.id ?? "",
                 isPlaying,
@@ -1050,14 +1053,17 @@ function App() {
       </div>
 
       {currentTrack && (
-        <div className="flex flex-col pb-2 shrink-0">
-          <TrackNotesEditor
+        <div
+          className="shrink-0 border-t border-white/10 bg-[rgba(2,2,6,0.98)] text-white shadow-[0_-15px_60px_rgba(0,0,0,0.65)]"
+        >
+          <TrackEditor
             track={currentTrack}
             annotation={currentAnnotation}
             onChange={handleAnnotationChange}
-            className="border-b border-white/10"
           />
           <PlayerBar
+            variant="bare"
+            className="px-4 py-3"
             track={currentTrack}
             isPlaying={isPlaying}
             isBuffering={isBuffering}
@@ -1073,7 +1079,9 @@ function App() {
             onSkipPrevious={goToPreviousTrack}
             onOpenFullScreen={handleOpenFullScreen}
           />
-          <LibraryTabs activeTab={activeTab} onTabChange={handleTabChange} />
+          <div className="border-t border-white/10">
+            <LibraryTabs activeTab={activeTab} onTabChange={handleTabChange} />
+          </div>
         </div>
       )}
       {isFullScreenPlayerOpen && currentTrack && (
@@ -1094,6 +1102,13 @@ function App() {
           onSkipPrevious={goToPreviousTrack}
           onClose={() => setIsFullScreenPlayerOpen(false)}
           onSeek={handleSeek}
+          annotation={currentAnnotation}
+          onAnnotationChange={handleAnnotationChange}
+          activeTab={activeTab}
+          onTabChange={(tab) => {
+            handleTabChange(tab);
+            setIsFullScreenPlayerOpen(false);
+          }}
         />
       )}
     </div>
