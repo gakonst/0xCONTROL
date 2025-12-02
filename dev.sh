@@ -15,11 +15,16 @@ R2_SQLITE_DIR="${R2_STATE_DIR}/miniflare-R2BucketObject"
 
 # Port selection (keep PORT for backward compatibility with the old script)
 R2_PORT="${PORT:-${R2_PORT:-3002}}"
+ANALYZER_PORT="${ANALYZER_PORT:-3000}"
 WRANGLER_PORT="${WRANGLER_PORT:-8787}"
 WEB_PORT="${WEB_PORT:-5173}"
 WEB_HOST="${WEB_HOST:-0.0.0.0}"
 
-for cmd in bun sqlite3 lsof tmux; do
+REQUIRED_CMDS=(bun sqlite3 lsof tmux)
+if [[ "${SKIP_LOCAL_ANALYZER:-0}" != "1" ]]; then
+  REQUIRED_CMDS+=(ffmpeg yt-dlp)
+fi
+for cmd in "${REQUIRED_CMDS[@]}"; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "$cmd is required" >&2; exit 1; }
 done
 
@@ -126,14 +131,17 @@ if [[ "${DEV_WITH_R2_SETUP_ONLY:-0}" == "1" || "${DEV_SETUP_ONLY:-0}" == "1" ]];
 fi
 
 # Clear conflicting listeners before starting new ones
+kill_port_processes "$ANALYZER_PORT" "analyzer dev server"
 kill_port_processes "$R2_PORT" "R2 dev server"
 kill_port_processes "$WRANGLER_PORT" "wrangler dev"
 kill_port_processes "$WEB_PORT" "Vite dev server"
 
 # Start processes
+ANALYZER_LOG="$ROOT_DIR/.analyzer-dev.log"
 R2_LOG="$ROOT_DIR/.r2-dev-server.log"
 WRANGLER_LOG="$ROOT_DIR/.wrangler-dev.log"
 WEB_LOG="$ROOT_DIR/.vite-dev.log"
+ANALYZER_PID=""
 R2_PID=""
 WRANGLER_PID=""
 WEB_PID=""
@@ -141,6 +149,7 @@ TMUX_LOG_SESSION=""
 declare -a TMUX_LOG_PANES=()
 
 cleanup() {
+  [[ -n "${ANALYZER_PID:-}" ]] && kill "$ANALYZER_PID" 2>/dev/null || true
   [[ -n "${WEB_PID:-}" ]] && kill "$WEB_PID" 2>/dev/null || true
   [[ -n "${WRANGLER_PID:-}" ]] && kill "$WRANGLER_PID" 2>/dev/null || true
   [[ -n "${R2_PID:-}" ]] && kill "$R2_PID" 2>/dev/null || true
@@ -158,12 +167,20 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+if [[ "${SKIP_LOCAL_ANALYZER:-0}" == "1" ]]; then
+  echo "Skipping analyzer dev server (SKIP_LOCAL_ANALYZER=1)."
+else
+  echo "Starting analyzer dev server on port ${ANALYZER_PORT}... (logs: $ANALYZER_LOG)"
+  (cd "$ROOT_DIR/containers/analyzer" && PORT="$ANALYZER_PORT" bun run start >"$ANALYZER_LOG" 2>&1) &
+  ANALYZER_PID=$!
+fi
+
 echo "Starting R2 dev server on port ${R2_PORT}... (logs: $R2_LOG)"
 (cd "$R2_HELPER_DIR" && PORT="$R2_PORT" bun run start >"$R2_LOG" 2>&1) &
 R2_PID=$!
 
 echo "Starting wrangler dev with R2 dev server... (logs: $WRANGLER_LOG)"
-(cd "$ROOT_DIR" && VITE_R2_DEV_SERVER_URL="http://localhost:${R2_PORT}" bunx wrangler dev --local --port "$WRANGLER_PORT" "$@" >"$WRANGLER_LOG" 2>&1) &
+(cd "$ROOT_DIR" && VITE_R2_DEV_SERVER_URL="http://localhost:${R2_PORT}" bunx wrangler dev --local --port "$WRANGLER_PORT" --var ANALYZER_HTTP_ORIGIN="http://localhost:${ANALYZER_PORT}" "$@" >"$WRANGLER_LOG" 2>&1) &
 WRANGLER_PID=$!
 
 echo "Starting Vite web dev server on port ${WEB_PORT}... (logs: $WEB_LOG)"

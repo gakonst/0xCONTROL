@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { LibraryHeader } from "@/components/library-header";
 import { createPlaylist } from "@/data/playlists";
+import { buildApiUrl } from "@/lib/api";
 import type { Playlist } from "@/types/playlists";
 
 const URL_PATTERN = /^https?:\/\//i;
@@ -27,7 +29,10 @@ export function PlaylistCreatePanel({ onPlaylistCreated }: PlaylistCreatePanelPr
   const [metadata, setMetadata] = useState<EmbedMetadata | null>(null);
   const [metadataState, setMetadataState] = useState<MetadataState>("idle");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [downloadStatus, setDownloadStatus] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const trimmedValue = entry.trim();
   const isUrl = URL_PATTERN.test(trimmedValue);
@@ -138,11 +143,60 @@ export function PlaylistCreatePanel({ onPlaylistCreated }: PlaylistCreatePanelPr
       void handleCreatePlaylist();
       return;
     }
-    // TODO: implement download flow
+    if (mode === "download") {
+      void handleDownload();
+    }
   };
 
   const isPrimaryDisabled =
-    mode === "idle" || (mode === "playlist" && (isSubmitting || !trimmedValue.length));
+    mode === "idle" ||
+    (mode === "playlist" && (isSubmitting || !trimmedValue.length)) ||
+    (mode === "download" && isDownloading);
+
+  const handleDownload = async () => {
+    if (mode !== "download" || !trimmedValue) return;
+
+    setIsDownloading(true);
+    setErrorMessage(null);
+    setDownloadStatus("Downloading...");
+    try {
+      const response = await fetch(buildApiUrl("/api/download"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: trimmedValue }),
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || "Download failed");
+      }
+
+      const payload = (await response.json()) as {
+        status?: string;
+        result?: { trackId: string };
+        error?: unknown;
+      };
+
+      if (!payload?.result?.trackId) {
+        throw new Error(
+          typeof payload?.error === "string"
+            ? payload.error
+            : "Download failed. Please try again.",
+        );
+      }
+
+      setDownloadStatus("Completed");
+      void queryClient.invalidateQueries({ queryKey: ["catalog"] });
+      setEntry("");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to download track. Please try again.";
+      setErrorMessage(message);
+      setDownloadStatus(null);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   return (
     <section className="flex h-full flex-col overflow-hidden bg-background shadow-[0_25px_120px_rgba(3,7,18,0.85)] backdrop-blur">
@@ -191,13 +245,18 @@ export function PlaylistCreatePanel({ onPlaylistCreated }: PlaylistCreatePanelPr
             className={`border px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.15rem] ${primaryButtonStateClasses} ${isPrimaryDisabled ? "opacity-60 cursor-not-allowed" : ""}`}
           >
             {mode === "download"
-              ? "Download"
+              ? isDownloading
+                ? "Downloading..."
+                : "Download"
               : isSubmitting
                 ? "Creating..."
                 : "Create"}
           </button>
           {errorMessage && (
             <p className="text-xs text-rose-200">{errorMessage}</p>
+          )}
+          {downloadStatus && !errorMessage && (
+            <p className="text-xs text-emerald-200">{downloadStatus}</p>
           )}
         </div>
       </div>

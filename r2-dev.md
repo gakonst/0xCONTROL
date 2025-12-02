@@ -5,14 +5,16 @@ This project uses the unofficial **cloudflare-r2-dev-server** to expose the loca
 ## One-command workflow
 Run:
 ```sh
-scripts/dev-with-r2.sh
+./dev.sh
 ```
+(the older `scripts/dev-with-r2.sh` flow still works if you have it around)
 What it does:
 - Clones `cloudflare-r2-dev-server` (if missing) and installs deps.
 - Finds the preview bucket sqlite (`zero-control-tracks-preview`) under `.wrangler/state/v3/r2/miniflare-R2BucketObject/*.sqlite`.
 - Writes `cloudflare-r2-dev-server/.env` with `R2_BUCKET_DATABASE_NAME` (and legacy `R2_BUCKET_DABASE_NAME`), bucket name, state path, and port (default 3002).
 - Updates `.env.local` with `VITE_R2_DEV_SERVER_URL=http://localhost:3002`.
 - Starts the R2 dev server + `bunx wrangler dev --local` in parallel; logs to `.r2-dev-server.log` and `.wrangler-dev.log`.
+- Also starts a local analyzer (Bun + ffmpeg + yt-dlp) on port 3000 so `/api/download` works without Cloudflare containers in local dev. Set `SKIP_LOCAL_ANALYZER=1` to skip, or `ANALYZER_PORT=3005` to change the port. The worker picks this up via `--var ANALYZER_HTTP_ORIGIN`.
 
 Stop: Ctrl+C (script traps both processes).
 
