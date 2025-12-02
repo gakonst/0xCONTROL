@@ -145,6 +145,8 @@ export interface Env {
   TRACKS_BUCKET: R2Bucket;
   TRACKS_DB: D1Database;
   ANALYZER_CONTAINER: ContainerNamespace;
+  /** Optional HTTP analyzer origin for local dev fallback (e.g. http://127.0.0.1:3000). */
+  ANALYZER_HTTP_ORIGIN?: string;
 }
 
 const INDEX_PATH = "index.html";
@@ -161,6 +163,59 @@ const requireAuth: MiddlewareHandler<WorkerContext> = async (c, next) => {
 
   await next();
 };
+
+const DEFAULT_ANALYZER_HTTP_ORIGIN = "http://127.0.0.1:3000";
+
+type AnalyzerEndpoint =
+  | { kind: "container"; client: AnalyzerContainer }
+  | { kind: "http"; origin: string };
+
+function normalizeHttpOrigin(origin?: string | null): string | null {
+  if (!origin) return null;
+  const trimmed = origin.trim();
+  if (!trimmed.length) return null;
+  return trimmed.replace(/\/$/, "");
+}
+
+function resolveAnalyzerEndpoint(env: Env): AnalyzerEndpoint {
+  const explicitHttp = normalizeHttpOrigin(env.ANALYZER_HTTP_ORIGIN);
+  if (explicitHttp) {
+    return { kind: "http", origin: explicitHttp };
+  }
+
+  if (env.ANALYZER_CONTAINER) {
+    try {
+      const client = getContainer(env.ANALYZER_CONTAINER, "waveform");
+      return { kind: "container", client };
+    } catch (error) {
+      console.warn("Analyzer container unavailable; falling back to HTTP origin", error);
+    }
+  }
+
+  return { kind: "http", origin: DEFAULT_ANALYZER_HTTP_ORIGIN };
+}
+
+async function analyzerFetch(env: Env, path: string, init: RequestInit): Promise<Response> {
+  const endpoint = resolveAnalyzerEndpoint(env);
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  if (endpoint.kind === "container") {
+    try {
+      await endpoint.client.startAndWaitForPorts();
+      const url = new URL(normalizedPath, "http://container");
+      return await endpoint.client.fetch(new Request(url, init));
+    } catch (error) {
+      const fallbackOrigin =
+        normalizeHttpOrigin(env.ANALYZER_HTTP_ORIGIN) ?? DEFAULT_ANALYZER_HTTP_ORIGIN;
+      console.warn("Analyzer container fetch failed; retrying via HTTP fallback", error);
+      const url = `${fallbackOrigin}${normalizedPath}`;
+      return await fetch(url, init);
+    }
+  }
+
+  const url = `${endpoint.origin}${normalizedPath}`;
+  return await fetch(url, init);
+}
 
 app.use(
   "/api/*",
@@ -223,9 +278,6 @@ app.post("/api/analyze", requireAuth, async (c) => {
   }
 
   try {
-    const analyzer = getContainer(c.env.ANALYZER_CONTAINER, "waveform");
-    await analyzer.startAndWaitForPorts();
-
     const analyzeUrl = new URL("http://container/analyze");
     if (typeof payload?.resolution === "number" && Number.isInteger(payload.resolution)) {
       analyzeUrl.searchParams.set("resolution", String(payload.resolution));
@@ -235,16 +287,14 @@ app.post("/api/analyze", requireAuth, async (c) => {
       analyzeUrl.searchParams.set("preset", presetKey);
     }
 
-    const analyzeResponse = await analyzer.fetch(
-      new Request(analyzeUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type":
-            object.httpMetadata?.contentType ?? inferContentTypeFromKey(object.key),
-        },
-        body: await object.arrayBuffer(),
-      }),
-    );
+    const analyzeResponse = await analyzerFetch(c.env, analyzeUrl.pathname + analyzeUrl.search, {
+      method: "POST",
+      headers: {
+        "Content-Type":
+          object.httpMetadata?.contentType ?? inferContentTypeFromKey(object.key),
+      },
+      body: object.body ?? (await object.arrayBuffer()),
+    });
 
     if (!analyzeResponse.ok) {
       const text = await analyzeResponse.text();
@@ -924,44 +974,12 @@ async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
     }
 
     try {
-      const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
-      await analyzer.startAndWaitForPorts();
-
-      const analyzeUrl = new URL("http://container/analyze");
-      const analyzeResponse = await analyzer.fetch(
-        new Request(analyzeUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              object.httpMetadata?.contentType ??
-              inferContentTypeFromKey(object.key),
-          },
-          body: await object.arrayBuffer(),
-        }),
+      await analyzeAndSave(
+        env,
+        trackId,
+        object.body ?? (await object.arrayBuffer()),
+        object.httpMetadata?.contentType ?? inferContentTypeFromKey(object.key),
       );
-
-      if (!analyzeResponse.ok) {
-        console.warn(
-          "Analyzer failed while backfilling",
-          trackId,
-          analyzeResponse.status,
-        );
-        continue;
-      }
-
-      const body = await analyzeResponse.json<Record<string, unknown>>();
-      const waveform = body.waveform as WaveformData | undefined;
-      const bpm = (body.bpm as number | null | undefined) ?? null;
-      const beatOffsetSeconds =
-        (body.beatOffsetSeconds as number | null | undefined) ?? null;
-
-      if (waveform && Array.isArray(waveform.bars)) {
-        await saveWaveformToDb(env.TRACKS_DB, trackId, {
-          waveform,
-          bpm,
-          beatOffsetSeconds,
-        });
-      }
     } catch (error) {
       console.warn("Backfill analysis failed", trackId, error);
     }
@@ -1149,29 +1167,30 @@ async function downloadTrack(
     url: params.url,
     preferredName: params.preferredName ?? undefined,
   });
-  const downloader = getContainer(env.ANALYZER_CONTAINER, "waveform");
-  await downloader.startAndWaitForPorts();
-
-  const response = await downloader.fetch(
-    new Request("http://container/download", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: params.url }),
-    }),
-  );
+  const response = await analyzerFetch(env, "/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: params.url }),
+  });
 
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`download failed (${response.status}): ${text}`);
   }
 
-  const buffer = await response.arrayBuffer();
   const contentType = response.headers.get("Content-Type") ?? "audio/mpeg";
   const titleHeader = response.headers.get("X-Track-Title");
   const title = titleHeader ?? params.preferredName ?? "Untitled";
   const artist = response.headers.get("X-Track-Artist") ?? "Unknown Artist";
   const durationSeconds = Number(response.headers.get("X-Track-Duration") ?? 0) || 0;
   const roundedDuration = Math.max(0, Math.round(durationSeconds));
+
+  const responseBody = response.body;
+  if (!responseBody) {
+    throw new Error("Download response missing audio body");
+  }
+
+  const [storeStream, analyzeStream] = responseBody.tee();
 
   const suggestedFileName =
     response.headers.get("X-Filename") ?? params.preferredName ?? `${title}.mp3`;
@@ -1181,19 +1200,19 @@ async function downloadTrack(
 
   console.log("[download] fetched", {
     trackId,
-    bytes: buffer.byteLength,
+    bytes: response.headers.get("Content-Length") ?? "stream",
     title,
     artist,
     duration: roundedDuration,
   });
 
-  await env.TRACKS_BUCKET.put(key, buffer, {
+  await env.TRACKS_BUCKET.put(key, storeStream, {
     httpMetadata: { contentType },
   });
 
   console.log("[download] stored", { key, contentType });
 
-  await analyzeBufferAndSave(env, trackId, buffer, contentType);
+  await analyzeAndSave(env, trackId, analyzeStream, contentType);
 
   console.log("[download] analyzed", { trackId });
 
@@ -1217,16 +1236,13 @@ async function downloadTrack(
   } satisfies DownloadResult;
 }
 
-async function analyzeBufferAndSave(
+async function analyzeAndSave(
   env: Env,
   trackId: string,
-  buffer: ArrayBuffer,
+  body: BodyInit,
   contentType?: string,
   options?: { resolution?: number; preset?: string | null },
 ) {
-  const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
-  await analyzer.startAndWaitForPorts();
-
   const analyzeUrl = new URL("http://container/analyze");
   if (options?.resolution !== undefined && Number.isInteger(options.resolution)) {
     analyzeUrl.searchParams.set("resolution", String(options.resolution));
@@ -1235,25 +1251,23 @@ async function analyzeBufferAndSave(
     analyzeUrl.searchParams.set("preset", options.preset);
   }
 
-  const response = await analyzer.fetch(
-    new Request(analyzeUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": contentType ?? "audio/mpeg",
-      },
-      body: buffer,
-    }),
-  );
+  const response = await analyzerFetch(env, analyzeUrl.pathname + analyzeUrl.search, {
+    method: "POST",
+    headers: {
+      "Content-Type": contentType ?? "audio/mpeg",
+    },
+    body,
+  });
 
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Analyzer failed (${response.status}): ${text}`);
   }
 
-  const body = await response.json<Record<string, unknown>>();
-  const waveform = body.waveform as WaveformData | undefined;
-  const bpm = (body.bpm as number | null | undefined) ?? null;
-  const beatOffsetSeconds = (body.beatOffsetSeconds as number | null | undefined) ?? null;
+  const parsed = await response.json<Record<string, unknown>>();
+  const waveform = parsed.waveform as WaveformData | undefined;
+  const bpm = (parsed.bpm as number | null | undefined) ?? null;
+  const beatOffsetSeconds = (parsed.beatOffsetSeconds as number | null | undefined) ?? null;
 
   if (waveform && Array.isArray(waveform.bars)) {
     await saveWaveformToDb(env.TRACKS_DB, trackId, {
