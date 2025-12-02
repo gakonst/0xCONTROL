@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 
 use axum::{
     body::Bytes,
-    extract::{ContentLengthLimit, Query, State},
+    extract::{DefaultBodyLimit, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -14,7 +14,7 @@ use once_cell::sync::Lazy;
 use rustfft::{num_complex::Complex, FftPlanner};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::{io::AsyncWriteExt, process::Command, signal};
+use tokio::{io::AsyncWriteExt, net::TcpListener, process::Command, signal};
 use tracing::{error, info};
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -179,7 +179,7 @@ struct AnalyzeQuery {
     preset: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct WaveformBar {
     amplitude: f32,
@@ -187,7 +187,7 @@ struct WaveformBar {
     whiteness: f32,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 struct Rgb {
     r: f32,
     g: f32,
@@ -266,12 +266,16 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/analyze", post(analyze))
+        .layer(DefaultBodyLimit::max(MAX_INPUT_BYTES))
         .with_state(());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("listening on {:?}", addr);
 
-    let server = axum::Server::bind(&addr).serve(app.into_make_service());
+    let listener = TcpListener::bind(addr)
+        .await
+        .expect("failed to bind listener");
+    let server = axum::serve(listener, app);
 
     if let Err(err) = server
         .with_graceful_shutdown(async move {
@@ -285,8 +289,8 @@ async fn main() {
 
 async fn analyze(
     Query(query): Query<AnalyzeQuery>,
-    ContentLengthLimit(body): ContentLengthLimit<Bytes, MAX_INPUT_BYTES>,
     State(_): State<()>,
+    body: Bytes,
 ) -> Result<Json<AnalyzeResponse>, AnalyzeError> {
     if body.is_empty() {
         return Err(AnalyzeError::EmptyBody);
@@ -418,7 +422,7 @@ fn analyze_waveform(pcm: &PcmData, resolution: usize, fft_size: usize) -> Option
 
     for band in &bands_per_bar {
         for (key, value) in band {
-            if let Some(entry) = maxima.get_mut(key.as_ref()) {
+            if let Some(entry) = maxima.get_mut(key) {
                 *entry = entry.max(*value);
             }
         }
@@ -456,7 +460,7 @@ fn analyze_waveform(pcm: &PcmData, resolution: usize, fft_size: usize) -> Option
                 0.9,
             );
 
-            let whiteness = clamp((air.powf(1.05) * 0.2), 0.0, 0.22);
+            let whiteness = clamp(air.powf(1.05) * 0.2, 0.0, 0.22);
             let r = clamp(bass * 1.18 * (1.0 - whiteness) + whiteness * 0.8, 0.0, 1.0);
             let g = clamp(voice * 1.22 * (1.0 - whiteness) + whiteness * 0.8, 0.0, 1.0);
             let b = clamp(melody * 1.38 * (1.0 - whiteness) + whiteness, 0.0, 1.0);
