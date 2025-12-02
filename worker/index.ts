@@ -121,8 +121,32 @@ type AnalyzeRequestPayload = {
   preset?: PresetKey;
 };
 
+type DownloadRequestPayload = {
+  source?: string;
+  tool?: "yt-dlp" | "spotdl" | "scdl";
+  output?: string;
+};
+
+type DownloadJob = {
+  id: string;
+  source: string;
+  tool: string;
+  status: string;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  output_path?: string | null;
+  message?: string | null;
+  progress?: number;
+};
+
 export class AnalyzerContainer extends Container {
   defaultPort = 3000;
+  sleepAfter = "10m";
+}
+
+export class DownloaderContainer extends Container {
+  defaultPort = 4000;
   sleepAfter = "10m";
 }
 
@@ -132,6 +156,7 @@ export interface Env {
   TRACKS_BUCKET: R2Bucket;
   TRACKS_DB: D1Database;
   ANALYZER_CONTAINER: ContainerNamespace;
+  DOWNLOADER_CONTAINER: ContainerNamespace;
 }
 
 const INDEX_PATH = "index.html";
@@ -257,6 +282,87 @@ app.post("/api/analyze", requireAuth, async (c) => {
   } catch (error) {
     console.error("Failed to analyze track", error);
     return c.text("Analysis failed", 500);
+  }
+});
+
+app.post("/api/download", requireAuth, async (c) => {
+  let payload: DownloadRequestPayload | null = null;
+  try {
+    payload = (await c.req.json()) as DownloadRequestPayload;
+  } catch {
+    return c.text("Invalid JSON payload", 400);
+  }
+
+  if (!payload?.source) {
+    return c.text("source is required", 400);
+  }
+
+  try {
+    const downloader = getContainer(c.env.DOWNLOADER_CONTAINER, "downloader");
+    await downloader.startAndWaitForPorts();
+
+    const response = await downloader.fetch(
+      new Request("http://container/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error("Downloader error", text);
+      return c.text("Downloader failed", 502);
+    }
+
+    const body = (await response.json()) as DownloadJob;
+    return c.json(body, 200, { "Cache-Control": "no-store" });
+  } catch (error) {
+    console.error("Failed to start download", error);
+    return c.text("Download failed", 500);
+  }
+});
+
+app.get("/api/progress", requireAuth, async (c) => {
+  try {
+    const downloader = getContainer(c.env.DOWNLOADER_CONTAINER, "downloader");
+    await downloader.startAndWaitForPorts();
+
+    const response = await downloader.fetch(new Request("http://container/progress"));
+    if (!response.ok) {
+      const text = await response.text();
+      console.error("Downloader error", text);
+      return c.text("Downloader failed", 502);
+    }
+
+    const body = (await response.json()) as DownloadJob[];
+    return c.json(body, 200, { "Cache-Control": "no-store" });
+  } catch (error) {
+    console.error("Failed to read progress", error);
+    return c.text("Progress failed", 500);
+  }
+});
+
+app.get("/api/progress/:jobId", requireAuth, async (c) => {
+  const jobId = c.req.param("jobId");
+  try {
+    const downloader = getContainer(c.env.DOWNLOADER_CONTAINER, "downloader");
+    await downloader.startAndWaitForPorts();
+
+    const response = await downloader.fetch(
+      new Request(`http://container/progress/${encodeURIComponent(jobId)}`),
+    );
+    if (!response.ok) {
+      const text = await response.text();
+      console.error("Downloader error", text);
+      return c.text("Downloader failed", 502);
+    }
+
+    const body = (await response.json()) as DownloadJob;
+    return c.json(body, 200, { "Cache-Control": "no-store" });
+  } catch (error) {
+    console.error("Failed to read job", error);
+    return c.text("Job lookup failed", 500);
   }
 });
 

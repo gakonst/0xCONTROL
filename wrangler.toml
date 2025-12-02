@@ -25,9 +25,19 @@ image = "./containers/analyzer/Dockerfile"
 max_instances = 2
 instance_type = "standard-2"
 
+[[env.preview.containers]]
+class_name = "DownloaderContainer"
+image = "./containers/downloader/Dockerfile"
+max_instances = 2
+instance_type = "standard-2"
+
 [[env.preview.durable_objects.bindings]]
 name = "ANALYZER_CONTAINER"
 class_name = "AnalyzerContainer"
+
+[[env.preview.durable_objects.bindings]]
+name = "DOWNLOADER_CONTAINER"
+class_name = "DownloaderContainer"
 
 [assets]
 directory = "./dist"
@@ -52,10 +62,24 @@ image = "./containers/analyzer/Dockerfile"
 max_instances = 2
 instance_type = "standard-2"
 
+[[containers]]
+class_name = "DownloaderContainer"
+image = "./containers/downloader/Dockerfile"
+max_instances = 2
+instance_type = "standard-2"
+
 [[durable_objects.bindings]]
 name = "ANALYZER_CONTAINER"
 class_name = "AnalyzerContainer"
 
+[[durable_objects.bindings]]
+name = "DOWNLOADER_CONTAINER"
+class_name = "DownloaderContainer"
+
 [[migrations]]
 tag = "v2-analyzer-container"
 new_sqlite_classes = ["AnalyzerContainer"]
+
+[[migrations]]
+tag = "v3-downloader-container"
+new_sqlite_classes = ["DownloaderContainer"]
