@@ -126,12 +126,19 @@ export class AnalyzerContainer extends Container {
   sleepAfter = "10m";
 }
 
+export class AnalyzerRustContainer extends Container {
+  defaultPort = 3000;
+  sleepAfter = "10m";
+}
+
 export interface Env {
   ASSETS: Fetcher;
   SONG_PASSWORD: string;
   TRACKS_BUCKET: R2Bucket;
   TRACKS_DB: D1Database;
   ANALYZER_CONTAINER: ContainerNamespace;
+  ANALYZER_RUST_CONTAINER?: ContainerNamespace;
+  ANALYZER_IMPL?: string;
 }
 
 const INDEX_PATH = "index.html";
@@ -139,6 +146,23 @@ const INDEX_PATH = "index.html";
 type WorkerContext = { Bindings: Env };
 
 const app = new Hono<WorkerContext>();
+
+function resolveAnalyzerContainer(env: Env): ContainerNamespace {
+  const preference = (env.ANALYZER_IMPL ?? "rust").toLowerCase();
+
+  if (preference === "rust" && env.ANALYZER_RUST_CONTAINER) {
+    return env.ANALYZER_RUST_CONTAINER;
+  }
+
+  if (preference === "js" && env.ANALYZER_CONTAINER) {
+    return env.ANALYZER_CONTAINER;
+  }
+
+  if (env.ANALYZER_RUST_CONTAINER) return env.ANALYZER_RUST_CONTAINER;
+  if (env.ANALYZER_CONTAINER) return env.ANALYZER_CONTAINER;
+
+  throw new Error("Analyzer container binding missing");
+}
 
 const requireAuth: MiddlewareHandler<WorkerContext> = async (c, next) => {
   const auth = await authenticateRequest(c);
@@ -210,7 +234,7 @@ app.post("/api/analyze", requireAuth, async (c) => {
   }
 
   try {
-    const analyzer = getContainer(c.env.ANALYZER_CONTAINER, "waveform");
+    const analyzer = getContainer(resolveAnalyzerContainer(c.env), "waveform");
     await analyzer.startAndWaitForPorts();
 
     const analyzeUrl = new URL("http://container/analyze");
@@ -876,7 +900,7 @@ async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
     }
 
     try {
-      const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
+      const analyzer = getContainer(resolveAnalyzerContainer(env), "waveform");
       await analyzer.startAndWaitForPorts();
 
       const analyzeUrl = new URL("http://container/analyze");

@@ -1,0 +1,17 @@
+[package]
+name = "analyzer-rust"
+version = "0.1.0"
+authors = ["0xCONTROL"]
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.7", features = ["macros"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.37", features = ["macros", "rt-multi-thread", "process", "io-util"] }
+thiserror = "1.0"
+rustfft = "6.2"
+once_cell = "1.19"
+bytemuck = { version = "1.16", features = ["extern_crate_std"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
