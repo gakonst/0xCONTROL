@@ -62,6 +62,22 @@ typings/
 
 # dotenv environment variables file
 .env
+.venv
+
+# Python caches
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Downloader artifacts
+containers/downloader/downloads/
+containers/downloader/uv.lock
+containers/downloader/.pytest_cache/
+containers/downloader/.python-version
+.uv-cache/
+
+# Root-level downloads
+downloads/
 
 # next.js build output
 .next

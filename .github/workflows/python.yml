@@ -1,0 +1,25 @@
+name: Python CI
+
+on:
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v2
+
+      - name: Install dependencies (runtime + dev)
+        working-directory: containers/downloader
+        run: uv sync --extra dev
+
+      - name: Run Python tests
+        working-directory: containers/downloader
+        run: uv run pytest -k "not download_real"

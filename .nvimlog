@@ -1,0 +1,2 @@
+WRN 2025-12-02T20:58:21.210 ?.99494    server_start:193: Failed to start server: operation not permitted: /var/folders/_7/lhk06bqj4ylbw2p0d2h48mhw0000gn/T/nvim.gakonst/5h7qud/nvim.99494.0
+WRN 2025-12-02T21:21:10.529 ?.7434     server_start:193: Failed to start server: operation not permitted: /var/folders/_7/lhk06bqj4ylbw2p0d2h48mhw0000gn/T/nvim.gakonst/quG4jo/nvim.7434.0

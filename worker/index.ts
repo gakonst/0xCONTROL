@@ -119,10 +119,44 @@ type AnalyzeRequestPayload = {
   path?: string;
   resolution?: number;
   preset?: PresetKey;
+  force?: boolean;
 };
+
+type DownloadRequestPayload = {
+  source?: string;
+  tool?: "yt-dlp" | "spotdl" | "scdl";
+  output?: string;
+  upload?: boolean;
+  r2Key?: string;
+  trackId?: string;
+  analyze?: boolean;
+};
+
+type DownloadJob = {
+  id: string;
+  source: string;
+  tool: string;
+  status: string;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  output_path?: string | null;
+  message?: string | null;
+  progress?: number;
+};
+
+const DOWNLOAD_POLL_INTERVAL_MS = 2500;
+const DOWNLOAD_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+const DOWNLOAD_TERMINAL_STATUSES = new Set(["completed", "failed", "skipped"]);
+const TRACKS_PREFIX = "tracks/";
 
 export class AnalyzerContainer extends Container {
   defaultPort = 3000;
+  sleepAfter = "10m";
+}
+
+export class DownloaderContainer extends Container {
+  defaultPort = 4000;
   sleepAfter = "10m";
 }
 
@@ -132,6 +166,8 @@ export interface Env {
   TRACKS_BUCKET: R2Bucket;
   TRACKS_DB: D1Database;
   ANALYZER_CONTAINER: ContainerNamespace;
+  DOWNLOADER_CONTAINER: ContainerNamespace;
+  R2_COMPAT_URL?: string;
 }
 
 const INDEX_PATH = "index.html";
@@ -193,10 +229,13 @@ app.post("/api/analyze", requireAuth, async (c) => {
 
   const trackId = candidateKeys[0];
 
-  // First try to serve cached analysis from D1.
-  const cached = await loadWaveformFromDb(c.env.TRACKS_DB, trackId);
-  if (cached) {
-    return c.json(cached, 200, { "Cache-Control": "no-store" });
+  // First try to serve cached analysis from D1 unless force is requested.
+  const force = payload?.force === true;
+  if (!force) {
+    const cached = await loadWaveformFromDb(c.env.TRACKS_DB, trackId);
+    if (cached) {
+      return c.json(cached, 200, { "Cache-Control": "no-store" });
+    }
   }
 
   let object: R2ObjectBody | null = null;
@@ -235,7 +274,7 @@ app.post("/api/analyze", requireAuth, async (c) => {
 
     if (!analyzeResponse.ok) {
       const text = await analyzeResponse.text();
-      console.error("Analyzer container failed", text);
+      console.error("Analyzer container failed", text.slice(0, 500));
       return c.text("Analyzer failed", 502);
     }
 
@@ -257,6 +296,103 @@ app.post("/api/analyze", requireAuth, async (c) => {
   } catch (error) {
     console.error("Failed to analyze track", error);
     return c.text("Analysis failed", 500);
+  }
+});
+
+app.post("/api/download", requireAuth, async (c) => {
+  let payload: DownloadRequestPayload | null = null;
+  try {
+    payload = (await c.req.json()) as DownloadRequestPayload;
+  } catch {
+    return c.text("Invalid JSON payload", 400);
+  }
+
+  if (!payload?.source) {
+    return c.text("source is required", 400);
+  }
+
+  try {
+    const downloader = getContainer(c.env.DOWNLOADER_CONTAINER, "downloader");
+    await downloader.startAndWaitForPorts();
+
+    const response = await downloader.fetch(
+      new Request("http://container/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error("Downloader error", text);
+      return c.text("Downloader failed", 502);
+    }
+
+    const body = (await response.json()) as DownloadJob;
+
+    const shouldUpload = payload?.upload !== false; // default to true for end-to-end pipeline
+    const shouldAnalyze = payload?.analyze !== false;
+    const r2Key = typeof payload?.r2Key === "string" ? payload.r2Key : undefined;
+    const trackId = typeof payload?.trackId === "string" ? payload.trackId : undefined;
+
+    if (shouldUpload) {
+      c.executionCtx.waitUntil(
+        handleDownloadPipeline(c.env, body, {
+          analyze: shouldAnalyze,
+          r2Key,
+          trackId,
+        }),
+      );
+    }
+
+    return c.json(body, 200, { "Cache-Control": "no-store" });
+  } catch (error) {
+    console.error("Failed to start download", error);
+    return c.text("Download failed", 500);
+  }
+});
+
+app.get("/api/progress", requireAuth, async (c) => {
+  try {
+    const downloader = getContainer(c.env.DOWNLOADER_CONTAINER, "downloader");
+    await downloader.startAndWaitForPorts();
+
+    const response = await downloader.fetch(new Request("http://container/progress"));
+    if (!response.ok) {
+      const text = await response.text();
+      console.error("Downloader error", text);
+      return c.text("Downloader failed", 502);
+    }
+
+    const body = (await response.json()) as DownloadJob[];
+    return c.json(body, 200, { "Cache-Control": "no-store" });
+  } catch (error) {
+    console.error("Failed to read progress", error);
+    return c.text("Progress failed", 500);
+  }
+});
+
+app.get("/api/progress/:jobId", requireAuth, async (c) => {
+  const jobId = c.req.param("jobId");
+  try {
+    const downloader = getContainer(c.env.DOWNLOADER_CONTAINER, "downloader");
+    await downloader.startAndWaitForPorts();
+
+    const response = await downloader.fetch(
+      new Request(`http://container/progress/${encodeURIComponent(jobId)}`),
+    );
+    if (!response.ok) {
+      const text = await response.text();
+      console.error("Downloader error", text);
+      return c.text("Downloader failed", 502);
+    }
+
+    const body = (await response.json()) as DownloadJob;
+    return c.json(body, 200, { "Cache-Control": "no-store" });
+  } catch (error) {
+    console.error("Failed to read job", error);
+    return c.text("Job lookup failed", 500);
   }
 });
 
@@ -845,6 +981,64 @@ async function saveWaveformToDb(
     .run();
 }
 
+async function upsertTrackMetadata(
+  db: D1Database,
+  trackId: string,
+  meta: {
+    name?: string;
+    artist?: string;
+    durationSeconds?: number | null;
+    bpm?: number | null;
+    key?: string | null;
+  },
+) {
+  const fallbackName = meta.name?.trim()?.length ? meta.name.trim() : trackId;
+  const fallbackArtist = meta.artist?.trim()?.length ? meta.artist.trim() : "Unknown";
+
+  const roundedDuration = Number.isFinite(meta.durationSeconds ?? NaN)
+    ? Math.max(0, Math.round(meta.durationSeconds ?? 0))
+    : 0;
+  const roundedBpm = Number.isFinite(meta.bpm ?? NaN)
+    ? Math.max(0, Math.round(meta.bpm ?? 0))
+    : 0;
+
+  const musicalKey = meta.key?.trim()?.length ? meta.key.trim() : "--";
+
+  const statement = `
+    INSERT INTO track_metadata (
+      track_id,
+      name,
+      artist,
+      duration_seconds,
+      bpm,
+      musical_key,
+      annotation_color,
+      annotation_note,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(track_id) DO UPDATE SET
+      name = excluded.name,
+      artist = excluded.artist,
+      duration_seconds = excluded.duration_seconds,
+      bpm = excluded.bpm,
+      musical_key = excluded.musical_key,
+      updated_at = CURRENT_TIMESTAMP
+  `;
+
+  await db
+    .prepare(statement)
+    .bind(
+      trackId,
+      fallbackName,
+      fallbackArtist,
+      roundedDuration,
+      roundedBpm,
+      musicalKey,
+    )
+    .run();
+}
+
 async function findTracksMissingWaveform(db: D1Database): Promise<string[]> {
   const statement = `
     SELECT track_id
@@ -893,10 +1087,12 @@ async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
       );
 
       if (!analyzeResponse.ok) {
+        const text = await analyzeResponse.text();
         console.warn(
           "Analyzer failed while backfilling",
           trackId,
           analyzeResponse.status,
+          text.slice(0, 500),
         );
         continue;
       }
@@ -918,6 +1114,276 @@ async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
       console.warn("Backfill analysis failed", trackId, error);
     }
   }
+}
+
+type DownloadPipelineOptions = {
+  analyze?: boolean;
+  r2Key?: string;
+  trackId?: string;
+};
+
+async function handleDownloadPipeline(
+  env: Env,
+  job: DownloadJob,
+  options: DownloadPipelineOptions,
+): Promise<void> {
+  try {
+    const downloader = getContainer(env.DOWNLOADER_CONTAINER, "downloader");
+    await downloader.startAndWaitForPorts();
+
+    const finalJob = await waitForDownloadCompletion(downloader, job.id);
+    if (!finalJob) {
+      console.warn("Download pipeline: job missing", job.id);
+      return;
+    }
+
+    if (!DOWNLOAD_TERMINAL_STATUSES.has(finalJob.status)) {
+      console.warn("Download pipeline: job not finished", finalJob.id, finalJob.status);
+      return;
+    }
+
+    if (finalJob.status === "failed") {
+      console.warn("Download pipeline: job failed", finalJob.id, finalJob.message);
+      return;
+    }
+
+    const outputPath = finalJob.output_path;
+    if (!outputPath) {
+      console.warn("Download pipeline: missing output path", finalJob.id);
+      return;
+    }
+
+    const { objectKey, trackId } = deriveObjectKey(outputPath, options);
+
+    const fileResponse = await fetchDownloadedFile(
+      downloader,
+      finalJob.id,
+      finalJob.output_path ?? undefined,
+    );
+    if (!fileResponse || !fileResponse.ok) {
+      const status = fileResponse?.status ?? "unknown";
+      console.warn("Download pipeline: unable to fetch file", finalJob.id, status);
+      return;
+    }
+
+    const contentType =
+      fileResponse.headers.get("Content-Type") ?? inferContentTypeFromKey(objectKey);
+
+    const body = fileResponse.body;
+    if (!body) {
+      console.warn("Download pipeline: missing body stream", finalJob.id);
+      return;
+    }
+
+    const baselineMeta = deriveMetadataFromObjectKey(objectKey, trackId);
+    await upsertTrackMetadata(env.TRACKS_DB, trackId, baselineMeta);
+
+    const shouldAnalyze = options.analyze !== false;
+    const compatUrl = env.R2_COMPAT_URL?.trim();
+
+    if (shouldAnalyze) {
+      const [sinkStream, analyzeStream] = body.tee();
+      await putObject(env, compatUrl, objectKey, sinkStream, contentType, finalJob.id);
+      await analyzeStreamAndPersist(env, trackId, analyzeStream, contentType);
+    } else {
+      await putObject(env, compatUrl, objectKey, body, contentType, finalJob.id);
+    }
+  } catch (error) {
+    console.warn("Download pipeline failed", job.id, error);
+  }
+}
+
+async function waitForDownloadCompletion(
+  downloader: Container,
+  jobId: string,
+): Promise<DownloadJob | null> {
+  const started = Date.now();
+  let lastStatus: string | undefined;
+
+  while (Date.now() - started < DOWNLOAD_POLL_TIMEOUT_MS) {
+    const job = await fetchDownloadJob(downloader, jobId);
+    if (job) {
+      if (DOWNLOAD_TERMINAL_STATUSES.has(job.status)) {
+        return job;
+      }
+      lastStatus = job.status;
+    }
+
+    await delay(DOWNLOAD_POLL_INTERVAL_MS);
+  }
+
+  console.warn("Download pipeline: timeout waiting for job", jobId, lastStatus);
+  return null;
+}
+
+async function fetchDownloadJob(
+  downloader: Container,
+  jobId: string,
+): Promise<DownloadJob | null> {
+  try {
+    const response = await downloader.fetch(
+      new Request(`http://container/progress/${encodeURIComponent(jobId)}`),
+    );
+    if (!response.ok) return null;
+    return (await response.json()) as DownloadJob;
+  } catch (error) {
+    console.warn("Download pipeline: fetch job failed", jobId, error);
+    return null;
+  }
+}
+
+async function fetchDownloadedFile(
+  downloader: Container,
+  jobId: string,
+  outputPath?: string,
+): Promise<Response | null> {
+  try {
+    const url = new URL("http://container/get");
+    url.searchParams.set("job_id", jobId);
+    if (outputPath) {
+      url.searchParams.set("path", outputPath);
+    }
+    return await downloader.fetch(new Request(url, { method: "GET" }));
+  } catch (error) {
+    console.warn("Download pipeline: fetch file failed", jobId, error);
+    return null;
+  }
+}
+
+async function analyzeStreamAndPersist(
+  env: Env,
+  trackId: string,
+  audioStream: ReadableStream,
+  contentType: string,
+) {
+  try {
+    const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
+    await analyzer.startAndWaitForPorts();
+
+    const analyzeUrl = new URL("http://container/analyze");
+    const analyzeResponse = await analyzer.fetch(
+      new Request(analyzeUrl, {
+        method: "POST",
+        headers: { "Content-Type": contentType },
+        body: audioStream,
+      }),
+    );
+
+    if (!analyzeResponse.ok) {
+      const text = await analyzeResponse.text();
+      console.warn("Analyzer failed for imported track", trackId, text.slice(0, 500));
+      return;
+    }
+
+    const body = await analyzeResponse.json<Record<string, unknown>>();
+    const waveform = body.waveform as WaveformData | undefined;
+    const bpm = (body.bpm as number | null | undefined) ?? null;
+    const beatOffsetSeconds =
+      (body.beatOffsetSeconds as number | null | undefined) ?? null;
+
+    if (waveform && Array.isArray(waveform.bars)) {
+      await saveWaveformToDb(env.TRACKS_DB, trackId, {
+        waveform,
+        bpm,
+        beatOffsetSeconds,
+      });
+
+      // Backfill core metadata now that we know duration/BPM.
+      await upsertTrackMetadata(env.TRACKS_DB, trackId, {
+        bpm,
+        durationSeconds: waveform.durationSeconds ?? undefined,
+      });
+    }
+  } catch (error) {
+    console.warn("Analyze + persist failed", trackId, error);
+  }
+}
+
+async function putObject(
+  env: Env,
+  compatUrl: string | undefined,
+  objectKey: string,
+  stream: ReadableStream,
+  contentType: string,
+  jobId: string,
+): Promise<void> {
+  if (compatUrl && compatUrl.length) {
+    const url = buildCompatUrl(compatUrl, objectKey);
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      body: stream,
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      console.warn("Compat R2 upload failed", jobId, response.status, text);
+      throw new Error("Compat R2 upload failed");
+    }
+    console.log(`Download pipeline: uploaded ${jobId} via compat to ${url}`);
+    return;
+  }
+
+  await env.TRACKS_BUCKET.put(objectKey, stream, {
+    httpMetadata: { contentType },
+  });
+  console.log(`Download pipeline: uploaded ${jobId} to R2 key ${objectKey}`);
+}
+
+function buildCompatUrl(base: string, key: string): string {
+  const normalizedBase = base.replace(/\/$/, "");
+  // Preserve path components; encode each segment.
+  const segments = key.split("/").map((part) => encodeURIComponent(part));
+  return `${normalizedBase}/${segments.join("/")}`;
+}
+
+function deriveObjectKey(
+  outputPath: string,
+  options: DownloadPipelineOptions,
+): { objectKey: string; trackId: string } {
+  const pathParts = outputPath.split(/[\\/]/);
+  const filename = pathParts[pathParts.length - 1] || outputPath || crypto.randomUUID();
+
+  const trackId = options.trackId?.trim()?.length
+    ? options.trackId.trim()
+    : filename;
+
+  const baseKey = options.r2Key?.trim()?.length ? options.r2Key.trim() : trackId;
+  const objectKey = baseKey.startsWith(TRACKS_PREFIX) ? baseKey : `${TRACKS_PREFIX}${baseKey}`;
+
+  return { objectKey, trackId };
+}
+
+function deriveMetadataFromObjectKey(
+  objectKey: string,
+  trackId: string,
+): {
+  name: string;
+  artist: string;
+  durationSeconds?: number;
+  bpm?: number;
+  key?: string | null;
+} {
+  const basename = (() => {
+    const parts = objectKey.split(/[\\/]/);
+    return parts[parts.length - 1] || trackId;
+  })();
+
+  const decoded = safeDecodeURIComponent(basename) ?? basename;
+  const nameWithoutExt = decoded.replace(/\.[^.]+$/, "");
+
+  // Heuristic: "Artist - Title" → artist/title; otherwise use filename as title.
+  const dashParts = nameWithoutExt.split(" - ");
+  if (dashParts.length >= 2) {
+    const artist = dashParts[0].trim() || "Unknown";
+    const title = dashParts.slice(1).join(" - ").trim() || nameWithoutExt;
+    return { name: title, artist };
+  }
+
+  return { name: nameWithoutExt || trackId, artist: "Unknown" };
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function mapPlaylistRow(

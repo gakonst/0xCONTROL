@@ -1,0 +1,16 @@
+[project]
+name = "downloader"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.103.2",
+    "uvicorn[standard]==0.23.2",
+    "yt-dlp==2025.11.12",
+    "spotdl==4.3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.4.2",
+    "pytest-asyncio==0.24.0",
+]
