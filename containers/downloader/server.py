@@ -160,7 +160,9 @@ class DownloadManager:
             if isinstance(detail, dict):
                 job.message = detail.get("text") or detail.get("stage") or job.message
                 job.stage = detail.get("stage", job.stage)
-                job.downloaded_bytes = detail.get("downloaded_bytes", job.downloaded_bytes)
+                job.downloaded_bytes = detail.get(
+                    "downloaded_bytes", job.downloaded_bytes
+                )
                 job.total_bytes = detail.get("total_bytes", job.total_bytes)
                 job.speed_bytes = detail.get("speed_bytes", job.speed_bytes)
                 job.speed = detail.get("speed", job.speed)

@@ -65,7 +65,9 @@ class ProgressReporter:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Download a track or playlist via the downloader libraries.")
+    parser = argparse.ArgumentParser(
+        description="Download a track or playlist via the downloader libraries."
+    )
     parser.add_argument("source", help="URL or search/query for yt-dlp/spotdl/scdl")
     parser.add_argument(
         "--tool",

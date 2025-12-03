@@ -2,6 +2,7 @@
 Unified, in-process download helpers for yt-dlp and spotdl (soundcloud uses yt-dlp).
 progress_cb signature: (percent: Optional[float], detail: dict) -> None
 """
+
 from __future__ import annotations
 
 import os
@@ -107,12 +108,14 @@ def _run_ytdlp(
         ydl_opts["cookiefile"] = cookie_file
     if use_po:
         client, token = use_po.split("+", 1)
-        ydl_opts.setdefault("extractor_args", {}).setdefault("youtube", {})["po_token"] = [
-            f"{client}+{token}"
-        ]
+        ydl_opts.setdefault("extractor_args", {}).setdefault("youtube", {})[
+            "po_token"
+        ] = [f"{client}+{token}"]
     if env_args := os.environ.get("YTDLP_EXTRACTOR_ARGS"):
         ydl_opts["extractor_args"] = {
-            "youtube": {k: v.split(",") for k, v in _parse_extractor_args(env_args).items()}
+            "youtube": {
+                k: v.split(",") for k, v in _parse_extractor_args(env_args).items()
+            }
         }
 
     try:
@@ -127,9 +130,13 @@ def _run_ytdlp(
         if new_files:
             mp3s = [p for p in new_files if p.suffix.lower() == ".mp3"]
             if mp3s:
-                final_path = str(sorted(mp3s, key=lambda p: p.stat().st_mtime, reverse=True)[0])
+                final_path = str(
+                    sorted(mp3s, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+                )
             else:
-                final_path = str(sorted(new_files, key=lambda p: p.stat().st_mtime, reverse=True)[0])
+                final_path = str(
+                    sorted(new_files, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+                )
         elif last_filename:
             cand = Path(last_filename).with_suffix(".mp3")
             final_path = str(cand) if cand.exists() else last_filename
@@ -172,7 +179,11 @@ def _run_spotdl(
     downloader = Downloader(settings=settings)
     downloader.progress_handler.update_callback = spotdl_cb
 
-    songs = [Song.from_url(source)] if source.startswith("http") else get_search_results(source)
+    songs = (
+        [Song.from_url(source)]
+        if source.startswith("http")
+        else get_search_results(source)
+    )
 
     try:
         results = downloader.download_multiple_songs(songs)

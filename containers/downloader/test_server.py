@@ -62,7 +62,10 @@ async def test_run_job_completes_and_tracks_progress(
     manager = server_module.DownloadManager()
     output_path = tmp_path / "download.mp3"
     job = server_module.Job(
-        id="job-2", source="https://example.com/track", tool="yt-dlp", output=output_path
+        id="job-2",
+        source="https://example.com/track",
+        tool="yt-dlp",
+        output=output_path,
     )
 
     async def fake_execute(target_job: server_module.Job) -> None:
