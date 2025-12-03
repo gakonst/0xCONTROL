@@ -71,3 +71,6 @@ typings/
 vite.config.js.timestamp-*
 dist/
 .vite/
+
+# Rust build artifacts
+target/
