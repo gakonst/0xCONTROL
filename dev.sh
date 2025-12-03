@@ -50,8 +50,13 @@ mkdir -p "$R2_HELPER_DIR"
 
 # Clone helper if missing
 if [[ ! -d "$R2_HELPER_DIR/.git" ]]; then
-  echo "Cloning cloudflare-r2-dev-server..."
+  echo "(Re)installing cloudflare-r2-dev-server helper..."
+  rm -rf "$R2_HELPER_DIR"
   git clone https://github.com/emilienbidet/cloudflare-r2-dev-server "$R2_HELPER_DIR"
+else
+  echo "Updating cloudflare-r2-dev-server helper..."
+  git -C "$R2_HELPER_DIR" fetch --all --quiet || true
+  git -C "$R2_HELPER_DIR" pull --ff-only --quiet || true
 fi
 
 pushd "$R2_HELPER_DIR" >/dev/null
