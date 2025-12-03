@@ -1,5 +1,0 @@
-fastapi==0.115.6
-uvicorn[standard]==0.32.1
-yt-dlp==2024.12.06
-spotdl==4.2.5
-scdl==2.8.6

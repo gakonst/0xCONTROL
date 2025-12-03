@@ -11,10 +11,10 @@ RUN apt-get update \
   && ln -s /root/.local/bin/uv /usr/local/bin/uv \
   && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /app/requirements.txt
-RUN uv pip install --system --no-cache -r requirements.txt
+COPY pyproject.toml uv.lock /app/
+RUN uv sync --no-dev --frozen
 
-COPY server.py /app/server.py
+COPY . /app
 
 ENV PORT=4000
 EXPOSE 4000

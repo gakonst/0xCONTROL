@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sys
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -9,10 +10,15 @@ from typing import Dict, List, Literal, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+# Ensure local module resolution when run via uvicorn.
+sys.path.append(str(Path(__file__).parent))
+from unified_downloader import guess_tool, run_download
+
 DownloadTool = Literal["yt-dlp", "spotdl", "scdl"]
 JobStatus = Literal["pending", "running", "completed", "failed", "skipped"]
 
-DOWNLOAD_ROOT = Path(os.environ.get("DOWNLOAD_ROOT", "/app/downloads"))
+DEFAULT_DOWNLOAD_ROOT = Path(__file__).parent / "downloads"
+DOWNLOAD_ROOT = Path(os.environ.get("DOWNLOAD_ROOT", DEFAULT_DOWNLOAD_ROOT))
 DOWNLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
 
@@ -38,6 +44,15 @@ class JobProgress(BaseModel):
     output_path: Optional[str] = None
     message: Optional[str] = None
     progress: float = 0.0
+    stage: Optional[str] = None
+    downloaded_bytes: Optional[int] = None
+    total_bytes: Optional[int] = None
+    speed_bytes: Optional[float] = None
+    speed: Optional[str] = None
+    eta_seconds: Optional[int] = None
+    eta: Optional[str] = None
+    track: Optional[str] = None
+    error: Optional[str] = None
 
 
 @dataclass
@@ -53,6 +68,15 @@ class Job:
     output_path: Optional[str] = None
     message: Optional[str] = None
     progress: float = 0.0
+    stage: Optional[str] = None
+    downloaded_bytes: Optional[int] = None
+    total_bytes: Optional[int] = None
+    speed_bytes: Optional[float] = None
+    speed: Optional[str] = None
+    eta_seconds: Optional[int] = None
+    eta: Optional[str] = None
+    track: Optional[str] = None
+    error: Optional[str] = None
     task: Optional[asyncio.Task] = None
 
     def to_progress(self) -> JobProgress:
@@ -67,6 +91,15 @@ class Job:
             output_path=self.output_path,
             message=self.message,
             progress=self.progress,
+            stage=self.stage,
+            downloaded_bytes=self.downloaded_bytes,
+            total_bytes=self.total_bytes,
+            speed_bytes=self.speed_bytes,
+            speed=self.speed,
+            eta_seconds=self.eta_seconds,
+            eta=self.eta,
+            track=self.track,
+            error=self.error,
         )
 
 
@@ -77,8 +110,8 @@ class DownloadManager:
 
     async def create_job(self, request: DownloadRequest) -> Job:
         tool = request.tool or self._guess_tool(request.source)
+        output_template = request.output or self._default_template(tool)
         output_dir = DOWNLOAD_ROOT
-        output_template = request.output or "%(title)s.%(ext)s"
         job = Job(
             id=str(uuid.uuid4()),
             source=request.source,
@@ -103,41 +136,7 @@ class DownloadManager:
         job.started_at = datetime.utcnow()
         job.status = "running"
         try:
-            if job.tool == "yt-dlp":
-                cmd = [
-                    "yt-dlp",
-                    "--newline",
-                    "--ignore-errors",
-                    "--no-overwrites",
-                    "-P",
-                    str(DOWNLOAD_ROOT),
-                    "-o",
-                    str(job.output.name),
-                    job.source,
-                ]
-            elif job.tool == "spotdl":
-                cmd = [
-                    "spotdl",
-                    "download",
-                    job.source,
-                    "--output",
-                    str(job.output),
-                    "--overwrite",
-                    "skip",
-                ]
-            else:
-                cmd = [
-                    "scdl",
-                    "-l",
-                    job.source,
-                    "-o",
-                    str(DOWNLOAD_ROOT),
-                    "--no-playlist-folder",
-                    "--overwrite",
-                    "skip",
-                ]
-
-            await self._execute(job, cmd)
+            await self._execute(job)
             if job.status not in ("failed", "skipped"):
                 job.status = "completed"
                 job.finished_at = datetime.utcnow()
@@ -146,7 +145,7 @@ class DownloadManager:
             job.finished_at = datetime.utcnow()
             job.message = f"error: {error}"
 
-    async def _execute(self, job: Job, cmd: List[str]) -> None:
+    async def _execute(self, job: Job) -> None:
         # Quick skip if output exists.
         target_pattern = job.output
         existing = list(DOWNLOAD_ROOT.glob(target_pattern.name))
@@ -157,30 +156,40 @@ class DownloadManager:
             job.message = "skipped: file already exists"
             return
 
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+        def progress_cb(percent: Optional[float], detail: dict | str) -> None:
+            if isinstance(detail, dict):
+                job.message = detail.get("text") or detail.get("stage") or job.message
+                job.stage = detail.get("stage", job.stage)
+                job.downloaded_bytes = detail.get("downloaded_bytes", job.downloaded_bytes)
+                job.total_bytes = detail.get("total_bytes", job.total_bytes)
+                job.speed_bytes = detail.get("speed_bytes", job.speed_bytes)
+                job.speed = detail.get("speed", job.speed)
+                job.eta_seconds = detail.get("eta_seconds", job.eta_seconds)
+                job.eta = detail.get("eta", job.eta)
+                job.track = detail.get("track", job.track)
+                job.error = detail.get("error", job.error)
+            else:
+                job.message = str(detail)
+            if percent is not None:
+                job.progress = percent
+
+        success, path, err = await asyncio.to_thread(
+            run_download,
+            job.tool,
+            job.source,
+            job.output.name,
+            DOWNLOAD_ROOT,
+            progress_cb,
         )
 
-        assert process.stdout
-        async for raw_line in process.stdout:
-            line = raw_line.decode("utf-8", errors="ignore").strip()
-            if line:
-                job.message = line
-                job.progress = self._infer_progress(line, job.progress)
-
-        returncode = await process.wait()
-        if returncode != 0:
+        if success:
+            job.output_path = path
+            job.message = "completed"
+        else:
             job.status = "failed"
             job.finished_at = datetime.utcnow()
-            job.message = f"exited with {returncode}"
-        else:
-            # Best-effort guess: set output_path to first matching file
-            matches = list(DOWNLOAD_ROOT.glob(target_pattern.name))
-            if matches:
-                job.output_path = str(matches[0])
-            job.message = "completed"
+            job.message = err or "failed"
+            job.progress_detail = job.progress_detail or {"stage": "failed", "error": job.message}
 
     def _infer_progress(self, line: str, previous: float) -> float:
         if "%" in line:
@@ -193,12 +202,14 @@ class DownloadManager:
         return previous
 
     def _guess_tool(self, source: str) -> DownloadTool:
-        lowered = source.lower()
-        if "spotify" in lowered:
-            return "spotdl"
-        if "soundcloud" in lowered:
-            return "scdl"
-        return "yt-dlp"
+        return guess_tool(source)  # type: ignore[return-value]
+
+    def _default_template(self, tool: DownloadTool) -> str:
+        if tool == "yt-dlp":
+            return "%(title)s.%(ext)s"
+        if tool == "spotdl":
+            return "{artists} - {title}.{output-ext}"
+        return "{title}"
 
 
 manager = DownloadManager()

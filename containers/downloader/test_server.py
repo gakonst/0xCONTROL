@@ -47,7 +47,7 @@ async def test_execute_marks_skipped_when_output_exists(
         id="job-1", source="https://example.com", tool="yt-dlp", output=output_path
     )
 
-    await manager._execute(job, ["yt-dlp", "https://example.com"])
+    await manager._execute(job)
 
     assert job.status == "skipped"
     assert job.output_path == str(output_path)
@@ -64,7 +64,7 @@ async def test_run_job_completes_and_tracks_progress(
         id="job-2", source="https://example.com/track", tool="yt-dlp", output=output_path
     )
 
-    async def fake_execute(target_job: server_module.Job, _cmd: list[str]) -> None:
+    async def fake_execute(target_job: server_module.Job) -> None:
         target_job.progress = 100.0
         target_job.output_path = str(output_path)
 
