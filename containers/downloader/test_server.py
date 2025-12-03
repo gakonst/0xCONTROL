@@ -23,7 +23,7 @@ def test_guess_tool_prefers_platform_keywords(server_module: ModuleType) -> None
     manager = server_module.DownloadManager()
 
     assert manager._guess_tool("https://open.spotify.com/track/123") == "spotdl"
-    assert manager._guess_tool("https://soundcloud.com/artist/track") == "scdl"
+    assert manager._guess_tool("https://soundcloud.com/artist/track") == "yt-dlp"
     assert manager._guess_tool("https://youtube.com/watch?v=abc") == "yt-dlp"
 
 

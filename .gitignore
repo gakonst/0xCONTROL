@@ -74,6 +74,7 @@ containers/downloader/downloads/
 containers/downloader/uv.lock
 containers/downloader/.pytest_cache/
 containers/downloader/.python-version
+.uv-cache/
 
 # Root-level downloads
 downloads/

@@ -1,15 +1,9 @@
 """
-Unified, in-process download helpers for yt-dlp, spotdl, and scdl.
-
-Provides:
-    run_download(tool, source, output_template, download_root, progress_cb)
-
+Unified, in-process download helpers for yt-dlp and spotdl (soundcloud uses yt-dlp).
 progress_cb signature: (percent: Optional[float], detail: dict) -> None
 """
-
 from __future__ import annotations
 
-import logging
 import os
 from pathlib import Path
 from typing import Callable, Optional, Tuple, Dict, Any
@@ -22,14 +16,6 @@ from spotdl.types.song import Song  # type: ignore
 from spotdl.utils.config import DEFAULT_CONFIG as SPOTDL_DEFAULTS  # type: ignore
 from spotdl.utils.search import get_search_results  # type: ignore
 from spotdl.utils.spotify import SpotifyClient  # type: ignore
-
-from scdl.scdl import (  # type: ignore
-    SoundCloud,
-    SCDLArgs,
-    download_url,
-    search_soundcloud,
-    validate_url,
-)
 
 ProgressCb = Callable[[Optional[float], Dict[str, Any]], None]
 
@@ -49,8 +35,6 @@ def run_download(
         return _run_ytdlp(source, download_root, template, progress_cb)
     if tool == "spotdl":
         return _run_spotdl(source, download_root, template, progress_cb)
-    if tool == "scdl":
-        return _run_scdl(source, download_root, template, progress_cb)
 
     return False, None, f"unknown tool: {tool}"
 
@@ -61,6 +45,9 @@ def _run_ytdlp(
     last_filename: Optional[str] = None
     cookie_file = os.environ.get("YTDLP_COOKIES")
     use_po = os.environ.get("YTDLP_PO_TOKEN")
+
+    progress_cb(0.0, {"stage": "starting"})
+    before = {p.name for p in download_root.glob("*")}
 
     def hook(status: dict) -> None:
         nonlocal last_filename
@@ -75,7 +62,7 @@ def _run_ytdlp(
             eta_val = status.get("eta")
             eta_str = formatSeconds(eta_val) if eta_val is not None else "n/a"
             detail = {
-                "stage": status.get("status", "downloading"),
+                "stage": "downloading",
                 "downloaded_bytes": downloaded,
                 "total_bytes": total,
                 "speed_bytes": speed_bytes,
@@ -102,7 +89,8 @@ def _run_ytdlp(
         "logger": _SilentLogger(),
         "quiet": True,
         "no_warnings": True,
-        "noprogress": True,
+        "noprogress": False,
+        "progress_with_newline": True,
         "format": "bestaudio/best",
         "postprocessors": [
             {
@@ -132,15 +120,19 @@ def _run_ytdlp(
             result = ydl.download([source])
         success = result == 0
 
-        final_path = last_filename
-        if last_filename:
-            cand = Path(last_filename).with_suffix(".mp3")
-            if cand.exists():
-                final_path = str(cand)
-        else:
-            mp3s = sorted(download_root.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)
+        after_files = list(download_root.glob("*"))
+        new_files = [p for p in after_files if p.name not in before]
+        final_path: Optional[str] = None
+
+        if new_files:
+            mp3s = [p for p in new_files if p.suffix.lower() == ".mp3"]
             if mp3s:
-                final_path = str(mp3s[0])
+                final_path = str(sorted(mp3s, key=lambda p: p.stat().st_mtime, reverse=True)[0])
+            else:
+                final_path = str(sorted(new_files, key=lambda p: p.stat().st_mtime, reverse=True)[0])
+        elif last_filename:
+            cand = Path(last_filename).with_suffix(".mp3")
+            final_path = str(cand) if cand.exists() else last_filename
 
         if success:
             return True, final_path, None
@@ -152,6 +144,7 @@ def _run_ytdlp(
 def _run_spotdl(
     source: str, download_root: Path, template: str, progress_cb: ProgressCb
 ) -> Tuple[bool, Optional[str], Optional[str]]:
+    progress_cb(0.0, {"stage": "starting"})
     try:
         SpotifyClient.init(
             client_id=SPOTDL_DEFAULTS["client_id"],
@@ -195,128 +188,11 @@ def _run_spotdl(
     return False, None, "spotdl produced no output path"
 
 
-def _run_scdl(
-    source: str, download_root: Path, name_format: str, progress_cb: ProgressCb
-) -> Tuple[bool, Optional[str], Optional[str]]:
-    args = _build_scdl_args(source, download_root, name_format)
-    client = SoundCloud(args["client_id"], args["auth_token"])
-
-    logging.getLogger("scdl").setLevel(logging.ERROR)
-
-    try:
-        import scdl.scdl as scdl_mod  # type: ignore
-        from tqdm import tqdm as real_tqdm  # type: ignore
-
-        def tqdm_wrapper(*tq_args, **tq_kwargs):
-            tq_kwargs["disable"] = True
-            bar = real_tqdm(*tq_args, **tq_kwargs)
-            orig_update = bar.update
-
-            def update(n=1):
-                res = orig_update(n)
-                pct = (bar.n / bar.total * 100) if bar.total else None
-                detail = {"stage": getattr(bar, "desc", None) or "downloading"}
-                progress_cb(pct, detail)
-                return res
-
-            bar.update = update  # type: ignore
-            return bar
-
-        scdl_mod.tqdm = tqdm_wrapper  # type: ignore
-    except Exception:
-        pass
-
-    try:
-        if args["s"]:
-            maybe_url = search_soundcloud(client, args["s"])
-            if maybe_url:
-                args["l"] = maybe_url
-        args["l"] = validate_url(client, args["l"])
-    except Exception as exc:  # noqa: BLE001
-        return False, None, f"scdl invalid URL/search: {exc}"
-
-    download_root.mkdir(parents=True, exist_ok=True)
-    cwd = os.getcwd()
-    os.chdir(download_root)
-
-    try:
-        download_url(client, args)
-    except SystemExit as exc:
-        os.chdir(cwd)
-        return False, None, f"scdl exited with code {exc.code}"
-    except Exception as exc:  # noqa: BLE001
-        os.chdir(cwd)
-        return False, None, f"scdl error: {exc}"
-
-    os.chdir(cwd)
-
-    files = sorted(
-        (p for p in download_root.glob("*") if not p.name.endswith(".scdl.lock")),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    for lock in download_root.glob("*.scdl.lock"):
-        lock.unlink(missing_ok=True)
-
-    return True, str(files[0]) if files else None, None
-
-
-def _build_scdl_args(source: str, download_root: Path, name_format: str) -> SCDLArgs:
-    return {
-        "C": False,
-        "a": False,
-        "add_description": False,
-        "addtimestamp": False,
-        "addtofile": False,
-        "auth_token": None,
-        "c": False,
-        "client_id": None,
-        "debug": False,
-        "download_archive": None,
-        "error": False,
-        "extract_artist": False,
-        "f": False,
-        "flac": False,
-        "force_metadata": False,
-        "hide_progress": True,
-        "hidewarnings": True,
-        "l": source,
-        "max_size": None,
-        "me": False,
-        "min_size": None,
-        "n": None,
-        "name_format": name_format,
-        "no_album_tag": False,
-        "no_original": False,
-        "no_playlist": False,
-        "no_playlist_folder": True,
-        "o": None,
-        "offset": 0,
-        "only_original": False,
-        "onlymp3": False,
-        "opus": False,
-        "original_art": False,
-        "original_metadata": False,
-        "original_name": False,
-        "overwrite": False,
-        "p": False,
-        "path": str(download_root),
-        "playlist_name_format": "{playlist[title]}_{title}",
-        "r": False,
-        "remove": False,
-        "s": None,
-        "strict_playlist": False,
-        "sync": None,
-        "t": False,
-    }
-
-
 def guess_tool(source: str) -> str:
     lowered = source.lower()
     if "spotify" in lowered:
         return "spotdl"
-    if "soundcloud" in lowered:
-        return "scdl"
+    # everything else (including soundcloud) goes through yt-dlp
     return "yt-dlp"
 
 
@@ -327,11 +203,7 @@ def _normalize_template(tool: str, user_template: Optional[str]) -> str:
         if user_template and "{" in user_template:
             return user_template
         return "{artists} - {title}.{output-ext}"
-    if user_template and "{" in user_template:
-        return user_template
-    if user_template and "%(title)" in user_template:
-        return user_template.replace("%(title)s", "{title}").replace("%(ext)s", "")
-    return "{title}"
+    return "%(title)s.%(ext)s"
 
 
 def _parse_extractor_args(raw: str) -> dict:

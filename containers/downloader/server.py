@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 sys.path.append(str(Path(__file__).parent))
 from unified_downloader import guess_tool, run_download
 
-DownloadTool = Literal["yt-dlp", "spotdl", "scdl"]
+DownloadTool = Literal["yt-dlp", "spotdl"]
 JobStatus = Literal["pending", "running", "completed", "failed", "skipped"]
 
 DEFAULT_DOWNLOAD_ROOT = Path(__file__).parent / "downloads"
