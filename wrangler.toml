@@ -4,7 +4,7 @@ compatibility_date = "2025-11-22"
 
 [env.preview]
 # Separate preview script name so Durable Objects/D1/R2 use isolated namespaces
-name = "zero-control-dapp-preview"
+name = "zero-control-dapp-preview-2"
 
 [env.preview.vars]
 SONG_PASSWORD = "true"
