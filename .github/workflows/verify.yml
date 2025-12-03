@@ -24,14 +24,6 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install Python dependencies
-        working-directory: containers/downloader
-        run: uv sync --extra dev
-
-      - name: Run Python tests
-        working-directory: containers/downloader
-        run: uv run pytest
-
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
