@@ -21,20 +21,10 @@ database_id = "c3db5162-f931-444f-883a-40ceeabf2fb2"
 database_name = "zero-control-tracks-preview"
 
 [[env.preview.containers]]
-class_name = "AnalyzerContainer"
-image = "./containers/analyzer/Dockerfile"
-max_instances = 2
-instance_type = "standard-2"
-
-[[env.preview.containers]]
 class_name = "AnalyzerRustContainer"
 image = "./containers/analyzer-rust/Dockerfile"
 max_instances = 2
 instance_type = "standard-2"
-
-[[env.preview.durable_objects.bindings]]
-name = "ANALYZER_CONTAINER"
-class_name = "AnalyzerContainer"
 
 [[env.preview.durable_objects.bindings]]
 name = "ANALYZER_RUST_CONTAINER"
@@ -59,28 +49,14 @@ SONG_PASSWORD = "true"
 ANALYZER_IMPL = "rust"
 
 [[containers]]
-class_name = "AnalyzerContainer"
-image = "./containers/analyzer/Dockerfile"
-max_instances = 2
-instance_type = "standard-2"
-
-[[containers]]
 class_name = "AnalyzerRustContainer"
 image = "./containers/analyzer-rust/Dockerfile"
 max_instances = 2
 instance_type = "standard-2"
 
 [[durable_objects.bindings]]
-name = "ANALYZER_CONTAINER"
-class_name = "AnalyzerContainer"
-
-[[durable_objects.bindings]]
 name = "ANALYZER_RUST_CONTAINER"
 class_name = "AnalyzerRustContainer"
-
-[[migrations]]
-tag = "v2-analyzer-container"
-new_sqlite_classes = ["AnalyzerContainer"]
 
 [[migrations]]
 tag = "v3-rust-analyzer-container"

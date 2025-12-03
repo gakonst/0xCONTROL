@@ -6,7 +6,7 @@ use tracing::error;
 async fn main() {
     init_tracing();
 
-    let port: u16 = env::var("PORT")
+    let port = env::var("PORT")
         .unwrap_or_else(|_| "3000".to_string())
         .parse()
         .unwrap_or(3000);

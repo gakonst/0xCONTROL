@@ -136,8 +136,8 @@ export interface Env {
   SONG_PASSWORD: string;
   TRACKS_BUCKET: R2Bucket;
   TRACKS_DB: D1Database;
-  ANALYZER_CONTAINER: ContainerNamespace;
-  ANALYZER_RUST_CONTAINER?: ContainerNamespace;
+  ANALYZER_CONTAINER?: ContainerNamespace;
+  ANALYZER_RUST_CONTAINER: ContainerNamespace;
   ANALYZER_IMPL?: string;
 }
 
@@ -150,18 +150,14 @@ const app = new Hono<WorkerContext>();
 function resolveAnalyzerContainer(env: Env): ContainerNamespace {
   const preference = (env.ANALYZER_IMPL ?? "rust").toLowerCase();
 
-  if (preference === "rust" && env.ANALYZER_RUST_CONTAINER) {
+  if (preference !== "js") {
     return env.ANALYZER_RUST_CONTAINER;
   }
 
-  if (preference === "js" && env.ANALYZER_CONTAINER) {
-    return env.ANALYZER_CONTAINER;
-  }
-
-  if (env.ANALYZER_RUST_CONTAINER) return env.ANALYZER_RUST_CONTAINER;
   if (env.ANALYZER_CONTAINER) return env.ANALYZER_CONTAINER;
 
-  throw new Error("Analyzer container binding missing");
+  // Explicitly fail if someone forces js but the binding isn't present.
+  throw new Error("Analyzer container binding missing (requested js, but only rust is configured)");
 }
 
 const requireAuth: MiddlewareHandler<WorkerContext> = async (c, next) => {
