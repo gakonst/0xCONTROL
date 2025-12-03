@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 from pathlib import Path
 from types import ModuleType
@@ -77,3 +78,56 @@ async def test_run_job_completes_and_tracks_progress(
     assert job.output_path == str(output_path)
     assert job.started_at is not None
     assert job.finished_at is not None
+
+
+# --- Integration downloads (real network) ---------------------------------- #
+
+
+@pytest.mark.asyncio()
+async def test_youtube_download_real(tmp_path: Path) -> None:
+    from unified_downloader import run_download
+
+    events: list[dict] = []
+
+    def cb(pct: float | None, detail: dict) -> None:
+        events.append(detail)
+
+    success, path, err = await asyncio.to_thread(
+        run_download,
+        "yt-dlp",
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "%(title)s.%(ext)s",
+        tmp_path,
+        cb,
+    )
+
+    assert success, f"yt-dlp failed: {err}"
+    assert path is not None
+    assert Path(path).exists()
+    assert Path(path).suffix.lower() == ".mp3"
+    assert events, "no progress events captured"
+
+
+@pytest.mark.asyncio()
+async def test_soundcloud_download_real(tmp_path: Path) -> None:
+    from unified_downloader import run_download
+
+    events: list[dict] = []
+
+    def cb(pct: float | None, detail: dict) -> None:
+        events.append(detail)
+
+    success, path, err = await asyncio.to_thread(
+        run_download,
+        "yt-dlp",
+        "https://soundcloud.com/spacemotion/space-motion-jes-call-my-2",
+        "%(title)s.%(ext)s",
+        tmp_path,
+        cb,
+    )
+
+    assert success, f"soundcloud via yt-dlp failed: {err}"
+    assert path is not None
+    assert Path(path).exists()
+    assert Path(path).suffix.lower() in {".mp3", ".m4a", ".webm", ".opus"}
+    assert events, "no progress events captured"

@@ -3,7 +3,7 @@ import os
 import sys
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
@@ -62,7 +62,7 @@ class Job:
     tool: DownloadTool
     output: Path
     status: JobStatus = "pending"
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     output_path: Optional[str] = None
@@ -133,16 +133,16 @@ class DownloadManager:
             return list(self.jobs.values())
 
     async def _run_job(self, job: Job) -> None:
-        job.started_at = datetime.utcnow()
+        job.started_at = datetime.now(timezone.utc)
         job.status = "running"
         try:
             await self._execute(job)
             if job.status not in ("failed", "skipped"):
                 job.status = "completed"
-                job.finished_at = datetime.utcnow()
+                job.finished_at = datetime.now(timezone.utc)
         except Exception as error:  # noqa: BLE001
             job.status = "failed"
-            job.finished_at = datetime.utcnow()
+            job.finished_at = datetime.now(timezone.utc)
             job.message = f"error: {error}"
 
     async def _execute(self, job: Job) -> None:
@@ -151,7 +151,7 @@ class DownloadManager:
         existing = list(DOWNLOAD_ROOT.glob(target_pattern.name))
         if existing:
             job.status = "skipped"
-            job.finished_at = datetime.utcnow()
+            job.finished_at = datetime.now(timezone.utc)
             job.output_path = str(existing[0])
             job.message = "skipped: file already exists"
             return
@@ -187,9 +187,8 @@ class DownloadManager:
             job.message = "completed"
         else:
             job.status = "failed"
-            job.finished_at = datetime.utcnow()
+            job.finished_at = datetime.now(timezone.utc)
             job.message = err or "failed"
-            job.progress_detail = job.progress_detail or {"stage": "failed", "error": job.message}
 
     def _infer_progress(self, line: str, previous: float) -> float:
         if "%" in line:
