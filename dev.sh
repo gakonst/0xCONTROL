@@ -118,6 +118,7 @@ else
   echo "VITE_R2_DEV_SERVER_URL=http://localhost:${R2_PORT}" >> "$ENV_LOCAL"
 fi
 
+# Point the frontend at the wrangler dev API origin instead of Vite's origin.
 echo "Updated ${ENV_LOCAL} with VITE_R2_DEV_SERVER_URL=http://localhost:${R2_PORT}"
 
 if [[ "${DEV_WITH_R2_SETUP_ONLY:-0}" == "1" || "${DEV_SETUP_ONLY:-0}" == "1" ]]; then

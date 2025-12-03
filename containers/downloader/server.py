@@ -1,4 +1,5 @@
 import asyncio
+import mimetypes
 import os
 import sys
 import uuid
@@ -7,7 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
+import asyncio.subprocess as aiosub
+
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse
+import asyncio.subprocess as aiosub
 from pydantic import BaseModel, Field
 
 # Ensure local module resolution when run via uvicorn.
@@ -217,6 +222,77 @@ manager = DownloadManager()
 app = FastAPI(title="Universal Downloader", version="0.1.0")
 
 
+def _resolve_output_path(path: str | Path | None) -> Optional[Path]:
+    """Resolve a job output path and ensure it stays within DOWNLOAD_ROOT."""
+
+    if not path:
+        return None
+
+    candidate = Path(path)
+
+    try:
+        resolved = candidate.resolve()
+    except Exception:  # noqa: BLE001 - best effort fallback
+        resolved = candidate
+
+    root = DOWNLOAD_ROOT.resolve()
+    try:
+        if not resolved.is_relative_to(root):
+            return None
+    except AttributeError:
+        # Py<3.9 fallback (not expected here) - manual check.
+        if not str(resolved).startswith(str(root)):
+            return None
+
+    return resolved
+
+
+def _guess_media_type(path: Path) -> str:
+    return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+
+
+async def _stream_ytdlp(url: str):
+    """Run yt-dlp and stream stdout chunks."""
+
+    proc = await aiosub.create_subprocess_exec(
+        "yt-dlp",
+        "-f",
+        "bestaudio/best",
+        "--no-progress",
+        "--quiet",
+        "--no-warnings",
+        "-o",
+        "-",
+        url,
+        stdout=aiosub.PIPE,
+        stderr=aiosub.PIPE,
+    )
+
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+
+    async def iterator():
+        try:
+            while True:
+                chunk = await proc.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+
+        stderr = await proc.stderr.read()
+        rc = await proc.wait()
+        if rc != 0:
+            raise RuntimeError(
+                f"yt-dlp exited {rc}: {stderr.decode('utf-8', 'ignore')[:400]}"
+            )
+
+    return StreamingResponse(iterator(), media_type="application/octet-stream")
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -246,3 +322,25 @@ async def job_detail(job_id: str) -> JobProgress:
 @app.get("/jobs", response_model=List[JobProgress])
 async def jobs() -> List[JobProgress]:
     return await progress()
+
+
+@app.get("/get")
+async def get_file(job_id: Optional[str] = None, path: Optional[str] = None):
+    if not job_id and not path:
+        raise HTTPException(status_code=400, detail="job_id or path is required")
+
+    resolved: Optional[Path] = None
+
+    if job_id:
+        job = await manager.get_job(job_id)
+        if not job or not job.output_path:
+            raise HTTPException(status_code=404, detail="job not found or no output")
+        resolved = _resolve_output_path(job.output_path)
+    else:
+        resolved = _resolve_output_path(path)
+
+    if not resolved or not resolved.exists():
+        raise HTTPException(status_code=404, detail="file not found")
+
+    media_type = _guess_media_type(resolved)
+    return FileResponse(resolved, media_type=media_type, filename=resolved.name)

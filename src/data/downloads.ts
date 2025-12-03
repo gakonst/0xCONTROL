@@ -17,6 +17,10 @@ export type DownloadPayload = {
   source: string;
   tool?: "yt-dlp" | "spotdl" | "scdl";
   output?: string;
+  upload?: boolean;
+  r2Key?: string;
+  trackId?: string;
+  analyze?: boolean;
 };
 
 export async function startDownload(payload: DownloadPayload): Promise<DownloadJob> {

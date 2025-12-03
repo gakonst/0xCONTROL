@@ -67,17 +67,20 @@ function decodeToPCM(input: Buffer): Promise<PcmData> {
     ffmpeg.on("error", (err) => reject(err));
 
     ffmpeg.on("close", (code) => {
+      const stderrText = Buffer.concat(stderr).toString("utf8");
+
       if (code !== 0) {
         return reject(
           new Error(
-            `ffmpeg exited with code ${code}: ${Buffer.concat(stderr).toString("utf8").slice(0, 4000)}`,
+            `ffmpeg exited with code ${code}: ${stderrText.slice(0, 4000)}`,
           ),
         );
       }
 
       const buffer = Buffer.concat(stdout);
       if (buffer.byteLength === 0) {
-        return reject(new Error("ffmpeg produced no output"));
+        const context = stderrText.length ? ` | stderr: ${stderrText.slice(0, 4000)}` : "";
+        return reject(new Error(`ffmpeg produced no output${context}`));
       }
 
       // Stereo float32 interleaved → mono float32

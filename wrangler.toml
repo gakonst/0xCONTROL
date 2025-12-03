@@ -8,6 +8,9 @@ name = "zero-control-dapp-preview-2"
 
 [env.preview.vars]
 SONG_PASSWORD = "true"
+R2_COMPAT_URL = "http://127.0.0.1:3002"
+
+compatibility_flags = ["nodejs_compat"]
 
 [[env.preview.r2_buckets]]
 binding = "TRACKS_BUCKET"
@@ -55,6 +58,7 @@ database_name = "zero-control-tracks"
 
 [vars]
 SONG_PASSWORD = "true"
+R2_COMPAT_URL = "http://127.0.0.1:3002"
 
 [[containers]]
 class_name = "AnalyzerContainer"

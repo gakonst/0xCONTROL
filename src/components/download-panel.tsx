@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMemo, useState, useEffect } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   fetchDownloadProgress,
@@ -16,6 +16,7 @@ function formatDate(value?: string | null): string {
 }
 
 export function DownloadPanel() {
+  const queryClient = useQueryClient();
   const [source, setSource] = useState("");
   const [tool, setTool] = useState<DownloadPayload["tool"] | "">("");
 
@@ -37,6 +38,15 @@ export function DownloadPanel() {
   });
 
   const jobs = useMemo(() => progressQuery.data ?? [], [progressQuery.data]);
+
+  useEffect(() => {
+    const hasCompleted = jobs.some(
+      (job) => job.status === "completed" || job.status === "skipped",
+    );
+    if (hasCompleted) {
+      void queryClient.invalidateQueries({ queryKey: ["catalog"] });
+    }
+  }, [jobs, queryClient]);
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

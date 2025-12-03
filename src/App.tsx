@@ -16,7 +16,6 @@ import { useAnnotationsApi } from "@/hooks/use-annotations-api";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useLibraryActions } from "@/hooks/use-library-actions";
 import { AppShell } from "@/components/app-shell";
-import { DownloadPanel } from "@/components/download-panel";
 import { fetchCatalogTracks, type Track } from "@/data/tracks";
 import type { TrackAnnotation } from "@/types/annotations";
 import type { Playlist } from "@/types/playlists";
@@ -206,40 +205,37 @@ function App() {
 
   return (
     <AppShell footer={footer}>
-      <div className="flex flex-col gap-4 px-4 pb-4">
-        <DownloadPanel />
-        <LibraryViewRouter
-          navigation={navigation}
-          playlists={playlists}
-          tracks={tracks}
-          visibleTracks={visibleTracks}
-          activeTrackId={currentTrack?.id ?? ""}
-          onTrackSelect={handleTrackSelect}
-          onPlaylistSelect={handlePlaylistSelect}
-          onPlaylistCreated={handlePlaylistCreated}
-          onFolderPathChange={navigation.route.setFolderPath}
-          folderPath={folderPath}
-          onTogglePin={togglePlaylistPin}
-          onToggleFavorite={togglePlaylistFavorite}
-          header={trackListHeader}
-          quickAddLabel={quickAddTargetPlaylist?.title}
-          onQuickAddToPlaylist={handleQuickAddToPlaylist}
-          quickRemoveLabel={
-            currentView.type === "playlistDetail" && activePlaylist
-              ? activePlaylist.title
-              : undefined
-          }
-          onQuickRemoveFromPlaylist={handleQuickRemoveFromPlaylist}
-          annotations={annotations}
-          playback={{
-            trackId: currentTrack?.id ?? "",
-            isPlaying: playbackApi.state.isPlaying,
-            elapsedSeconds: playbackApi.state.elapsedSeconds,
-            durationSeconds: preferredDurationSeconds ?? undefined,
-            liveTimeGetter: playbackApi.liveTimeGetter,
-          }}
-        />
-      </div>
+      <LibraryViewRouter
+        navigation={navigation}
+        playlists={playlists}
+        tracks={tracks}
+        visibleTracks={visibleTracks}
+        activeTrackId={currentTrack?.id ?? ""}
+        onTrackSelect={handleTrackSelect}
+        onPlaylistSelect={handlePlaylistSelect}
+        onPlaylistCreated={handlePlaylistCreated}
+        onFolderPathChange={navigation.route.setFolderPath}
+        folderPath={folderPath}
+        onTogglePin={togglePlaylistPin}
+        onToggleFavorite={togglePlaylistFavorite}
+        header={trackListHeader}
+        quickAddLabel={quickAddTargetPlaylist?.title}
+        onQuickAddToPlaylist={handleQuickAddToPlaylist}
+        quickRemoveLabel={
+          currentView.type === "playlistDetail" && activePlaylist
+            ? activePlaylist.title
+            : undefined
+        }
+        onQuickRemoveFromPlaylist={handleQuickRemoveFromPlaylist}
+        annotations={annotations}
+        playback={{
+          trackId: currentTrack?.id ?? "",
+          isPlaying: playbackApi.state.isPlaying,
+          elapsedSeconds: playbackApi.state.elapsedSeconds,
+          durationSeconds: preferredDurationSeconds ?? undefined,
+          liveTimeGetter: playbackApi.liveTimeGetter,
+        }}
+      />
 
       {isFullScreenPlayerOpen && currentTrack && (
         <FullScreenPlayer
