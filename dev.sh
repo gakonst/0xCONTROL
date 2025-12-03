@@ -9,6 +9,7 @@ shopt -s nullglob
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 R2_HELPER_DIR="${ROOT_DIR}/cloudflare-r2-dev-server"
+TRACKS_DIR="/Users/gakonst/projects/0xCONTROL/tracks"
 WRANGLER_TOML="${ROOT_DIR}/wrangler.toml"
 R2_STATE_DIR="${ROOT_DIR}/.wrangler/state/v3/r2"
 R2_SQLITE_DIR="${R2_STATE_DIR}/miniflare-R2BucketObject"
@@ -54,10 +55,8 @@ if [[ ! -d "$R2_HELPER_DIR/.git" ]]; then
 fi
 
 pushd "$R2_HELPER_DIR" >/dev/null
-  if [[ ! -f bun.lockb ]]; then
-    echo "Installing helper dependencies..."
-    bun install
-  fi
+  echo "Ensuring helper dependencies..."
+  bun install
 popd >/dev/null
 
 # Choose the sqlite backing the preview bucket by checking blob ids
@@ -106,6 +105,7 @@ R2_BUCKET_DATABASE_NAME="$DB_NAME"
 R2_BUCKET_DABASE_NAME="$DB_NAME"
 R2_BUCKET_PATH="$R2_STATE_DIR/"
 PORT="$R2_PORT"
+TRACKS_DIR="$TRACKS_DIR"
 EOF
 
 echo "Helper .env configured: bucket=$PREVIEW_BUCKET_NAME db=$DB_NAME port=$R2_PORT"
