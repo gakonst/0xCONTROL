@@ -47,6 +47,7 @@ if [[ -z "$PREVIEW_BUCKET_NAME" ]]; then
 fi
 
 mkdir -p "$R2_HELPER_DIR"
+mkdir -p "$R2_SQLITE_DIR"
 
 # Clone helper if missing
 if [[ ! -d "$R2_HELPER_DIR/.git" ]]; then
@@ -100,6 +101,13 @@ if [[ -z "$DB_NAME" ]]; then
       exit 1
     fi
   fi
+fi
+
+# Ensure backing sqlite exists so the helper can start cleanly.
+SQLITE_PATH="$R2_SQLITE_DIR/${DB_NAME}.sqlite"
+if [[ ! -f "$SQLITE_PATH" ]]; then
+  echo "Creating R2 sqlite backing file at $SQLITE_PATH"
+  sqlite3 "$SQLITE_PATH" "" || { echo "Failed to create $SQLITE_PATH" >&2; exit 1; }
 fi
 
 # Write helper .env
