@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 
 import { Container, getContainer, type ContainerNamespace } from "@cloudflare/containers";
-import type { D1Database, ExecutionContext, KVNamespace } from "@cloudflare/workers-types";
+import type { D1Database, ExecutionContext } from "@cloudflare/workers-types";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
@@ -138,7 +138,6 @@ export interface Env {
   TRACKS_BUCKET: R2Bucket;
   TRACKS_DB: D1Database;
   ANALYZER_CONTAINER: ContainerNamespace;
-  NONCE_STORE: KVNamespace;
   JWT_SECRET: string;
 }
 
@@ -193,7 +192,7 @@ async function authenticateRequest(c: Parameters<typeof requireAuth>[0]) {
 
 app.on(["GET", "POST", "OPTIONS"], "/api/siwe/nonce", async (c) => {
   const nonce = generateSiweNonce();
-  await c.env.NONCE_STORE.put(nonce, "valid", { expirationTtl: 600 });
+  await storeNonce(c.env.TRACKS_DB, nonce, 600);
 
   return c.json({ nonce });
 });
@@ -212,12 +211,10 @@ app.on(["POST", "OPTIONS"], "/api/siwe/verify", async (c) => {
     return c.json({ error: "Nonce is required" }, 400);
   }
 
-  const nonceSession = await c.env.NONCE_STORE.get(nonce);
-  if (!nonceSession) {
+  const nonceValid = await consumeNonce(c.env.TRACKS_DB, nonce);
+  if (!nonceValid) {
     return c.json({ error: "Invalid or expired nonce" }, 401);
   }
-
-  await c.env.NONCE_STORE.delete(nonce);
 
   const client = RelayClient.fromPorto(Porto.create(), { chainId });
   const valid = await verifySiweMessage(client, {
@@ -1262,6 +1259,58 @@ function inferContentTypeFromKey(key: string): string {
 
 function isValidAnnotationColor(value: string): value is AnnotationColor {
   return value === "red" || value === "blue" || value === "pink" || value === "cyan";
+}
+
+async function storeNonce(db: D1Database, nonce: string, ttlSeconds: number) {
+  const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
+
+  await db
+    .prepare(
+      `
+        INSERT INTO siwe_nonces (nonce, expires_at)
+        VALUES (?, ?)
+        ON CONFLICT(nonce) DO UPDATE SET
+          expires_at = excluded.expires_at,
+          consumed = 0,
+          updated_at = CURRENT_TIMESTAMP
+      `,
+    )
+    .bind(nonce, expiresAt)
+    .run();
+}
+
+async function consumeNonce(db: D1Database, nonce: string) {
+  const now = Math.floor(Date.now() / 1000);
+
+  const entry = await db
+    .prepare(
+      `
+        SELECT nonce
+        FROM siwe_nonces
+        WHERE nonce = ?
+          AND consumed = 0
+          AND expires_at > ?
+      `,
+    )
+    .bind(nonce, now)
+    .first<{ nonce: string }>();
+
+  if (!entry) {
+    return false;
+  }
+
+  await db
+    .prepare(
+      `
+        UPDATE siwe_nonces
+        SET consumed = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE nonce = ?
+      `,
+    )
+    .bind(nonce)
+    .run();
+
+  return true;
 }
 
 async function ensureUserExists(db: D1Database, address: string) {

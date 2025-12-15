@@ -15,10 +15,6 @@ binding = "TRACKS_BUCKET"
 bucket_name = "zero-control-tracks"
 preview_bucket_name = "zero-control-tracks-preview"
 
-[[env.preview.kv_namespaces]]
-binding = "NONCE_STORE"
-id = "preview-nonce-store"
-
 [[env.preview.d1_databases]]
 binding = "TRACKS_DB"
 database_id = "c3db5162-f931-444f-883a-40ceeabf2fb2"
@@ -42,10 +38,6 @@ binding = "ASSETS"
 binding = "TRACKS_BUCKET"
 bucket_name = "zero-control-tracks"
 preview_bucket_name = "zero-control-tracks-preview"
-
-[[kv_namespaces]]
-binding = "NONCE_STORE"
-id = "zero-control-nonce-store"
 
 [[d1_databases]]
 binding = "TRACKS_DB"

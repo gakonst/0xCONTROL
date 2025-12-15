@@ -55,6 +55,16 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS siwe_nonces (
+  nonce TEXT PRIMARY KEY,
+  consumed INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_siwe_nonces_expires_at ON siwe_nonces (expires_at);
+
 CREATE TABLE IF NOT EXISTS tempo_http_keys (
   key_id TEXT PRIMARY KEY,
   address TEXT NOT NULL,
