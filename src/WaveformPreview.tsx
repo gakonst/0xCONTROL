@@ -57,6 +57,7 @@ export function WaveformPreview() {
       try {
         const response = await fetch(buildApiUrl("/api/catalog"), {
           cache: "no-store",
+          credentials: "include",
         });
         if (!response.ok) throw new Error(`catalog status ${response.status}`);
         const payload = (await response.json()) as { tracks?: CatalogRecord[] };

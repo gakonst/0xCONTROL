@@ -15,6 +15,7 @@ export async function fetchWaveformAnalysis(
   try {
     const response = await fetch(apiUrl, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: trackId }),
     });

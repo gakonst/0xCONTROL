@@ -12,6 +12,7 @@ export async function updateTrackAnnotation(
     buildApiUrl(`/api/tracks/${encodedId}/annotation`),
     {
       method: "PATCH",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
       },

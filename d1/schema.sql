@@ -48,3 +48,18 @@ CREATE TABLE IF NOT EXISTS playlist_tracks (
 
 CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist
   ON playlist_tracks (playlist_id, position);
+
+CREATE TABLE IF NOT EXISTS users (
+  address TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS tempo_http_keys (
+  key_id TEXT PRIMARY KEY,
+  address TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (address) REFERENCES users(address) ON DELETE CASCADE
+);

@@ -45,6 +45,7 @@ export async function fetchPlaylists(
   const response = await fetch(buildApiUrl("/api/playlists"), {
     method: "GET",
     signal,
+    credentials: "include",
     headers: {
       "Cache-Control": "no-store",
     },
@@ -63,6 +64,7 @@ export async function createPlaylist(
 ): Promise<Playlist> {
   const response = await fetch(buildApiUrl("/api/playlists"), {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
     },
@@ -87,6 +89,7 @@ export async function updatePlaylistMeta(
     buildApiUrl(`/api/playlists/${encodeURIComponent(playlistId)}`),
     {
       method: "PATCH",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
       },
@@ -112,6 +115,7 @@ export async function addTrackToPlaylist(
     buildApiUrl(`/api/playlists/${encodeURIComponent(playlistId)}/tracks`),
     {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
       },
@@ -139,6 +143,7 @@ export async function removeTrackFromPlaylist(
     ),
     {
       method: "DELETE",
+      credentials: "include",
     },
   );
 

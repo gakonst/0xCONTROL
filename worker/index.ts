@@ -1,12 +1,18 @@
 /// <reference types="@cloudflare/workers-types" />
 
 import { Container, getContainer, type ContainerNamespace } from "@cloudflare/containers";
-import type { D1Database, ExecutionContext } from "@cloudflare/workers-types";
+import type { D1Database, ExecutionContext, KVNamespace } from "@cloudflare/workers-types";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import * as jwt from "hono/jwt";
 import type { MiddlewareHandler } from "hono";
 import type { PresetKey } from "../src/lib/waveform";
 import type { WaveformAnalysis, WaveformData } from "../src/lib/waveform";
+import { generateSiweNonce, parseSiweMessage, verifySiweMessage } from "viem/siwe";
+import type { Address } from "viem";
+import { Porto } from "porto";
+import { RelayClient } from "porto/viem";
 
 type AnnotationColor = "red" | "blue" | "pink" | "cyan";
 
@@ -132,11 +138,15 @@ export interface Env {
   TRACKS_BUCKET: R2Bucket;
   TRACKS_DB: D1Database;
   ANALYZER_CONTAINER: ContainerNamespace;
+  NONCE_STORE: KVNamespace;
+  JWT_SECRET: string;
 }
 
 const INDEX_PATH = "index.html";
 
-type WorkerContext = { Bindings: Env };
+type JwtPayload = { sub: string; exp: number };
+
+type WorkerContext = { Bindings: Env; Variables: { jwtPayload: JwtPayload; address: Address } };
 
 const app = new Hono<WorkerContext>();
 
@@ -145,6 +155,9 @@ const requireAuth: MiddlewareHandler<WorkerContext> = async (c, next) => {
   if (!auth) {
     return c.text("Unauthorized", 401);
   }
+
+  c.set("jwtPayload", auth);
+  c.set("address", auth.sub as Address);
 
   await next();
 };
@@ -155,13 +168,118 @@ app.use(
     origin: (origin) => origin ?? "*",
     allowMethods: ["GET", "OPTIONS", "PATCH", "POST", "DELETE"],
     allowHeaders: ["Content-Type", "Cache-Control"],
+    credentials: true,
   }),
 );
 
-async function authenticateRequest(_c: Parameters<typeof requireAuth>[0]) {
-  // TODO: wire proper auth once we lock requirements.
-  return true;
+const AUTH_COOKIE_NAME = "auth";
+
+async function authenticateRequest(c: Parameters<typeof requireAuth>[0]) {
+  const token = getCookie(c, AUTH_COOKIE_NAME);
+  if (!token) return null;
+
+  try {
+    const payload = await jwt.verify(token, c.env.JWT_SECRET);
+
+    if (typeof payload === "object" && payload && "sub" in payload) {
+      return payload as JwtPayload;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
+
+app.on(["GET", "POST", "OPTIONS"], "/api/siwe/nonce", async (c) => {
+  const nonce = generateSiweNonce();
+  await c.env.NONCE_STORE.put(nonce, "valid", { expirationTtl: 600 });
+
+  return c.json({ nonce });
+});
+
+app.on(["POST", "OPTIONS"], "/api/siwe/verify", async (c) => {
+  const { message, signature } = (await c.req.json()) as { message?: string; signature?: string };
+
+  if (!message || !signature) {
+    return c.json({ error: "Message and signature are required" }, 400);
+  }
+
+  const siweMessage = parseSiweMessage(message);
+  const { address, chainId, nonce } = siweMessage;
+
+  if (!nonce) {
+    return c.json({ error: "Nonce is required" }, 400);
+  }
+
+  const nonceSession = await c.env.NONCE_STORE.get(nonce);
+  if (!nonceSession) {
+    return c.json({ error: "Invalid or expired nonce" }, 401);
+  }
+
+  await c.env.NONCE_STORE.delete(nonce);
+
+  const client = RelayClient.fromPorto(Porto.create(), { chainId });
+  const valid = await verifySiweMessage(client, {
+    address: address!,
+    message,
+    signature,
+  });
+
+  if (!valid) {
+    return c.json({ error: "Invalid signature" }, 401);
+  }
+
+  await ensureUserExists(c.env.TRACKS_DB, address!);
+
+  const maxAge = 60 * 60 * 24 * 7;
+  const exp = Math.floor(Date.now() / 1000) + maxAge;
+
+  const token = await jwt.sign({ exp, sub: address }, c.env.JWT_SECRET);
+  setCookie(c, AUTH_COOKIE_NAME, token, {
+    httpOnly: true,
+    maxAge,
+    path: "/",
+    sameSite: "lax",
+    secure: true,
+  });
+
+  return c.json({ success: true });
+});
+
+app.post("/api/siwe/logout", requireAuth, async (c) => {
+  deleteCookie(c, AUTH_COOKIE_NAME);
+  return c.json({ success: true });
+});
+
+app.on(["GET", "OPTIONS"], "/api/me", requireAuth, async (c) => {
+  return c.json({ address: c.get("address") });
+});
+
+app.put("/api/tempo/http-keys/:keyId", requireAuth, async (c) => {
+  const keyId = c.req.param("keyId");
+  if (!keyId) return c.text("Key id is required", 400);
+
+  const body = await c.req.json();
+  const payload = JSON.stringify(body);
+  const address = c.get("address");
+
+  await upsertTempoHttpKey(c.env.TRACKS_DB, { keyId, address, payload });
+
+  return c.json({ success: true });
+});
+
+app.get("/api/tempo/http-keys/:keyId", requireAuth, async (c) => {
+  const keyId = c.req.param("keyId");
+  if (!keyId) return c.text("Key id is required", 400);
+
+  const address = c.get("address");
+  const record = await loadTempoHttpKey(c.env.TRACKS_DB, { keyId, address });
+
+  if (!record) return c.text("Not found", 404);
+
+  return c.json(JSON.parse(record.payload));
+});
 
 app.get("/api/tracks", requireAuth, async (c) => {
   const catalog = await buildCatalogResponse(c.env, c.executionCtx);
@@ -1144,4 +1262,56 @@ function inferContentTypeFromKey(key: string): string {
 
 function isValidAnnotationColor(value: string): value is AnnotationColor {
   return value === "red" || value === "blue" || value === "pink" || value === "cyan";
+}
+
+async function ensureUserExists(db: D1Database, address: string) {
+  await db
+    .prepare(
+      `
+        INSERT INTO users (address)
+        VALUES (?)
+        ON CONFLICT(address) DO UPDATE SET
+          updated_at = CURRENT_TIMESTAMP
+      `,
+    )
+    .bind(address)
+    .run();
+}
+
+async function upsertTempoHttpKey(
+  db: D1Database,
+  params: { keyId: string; address: string; payload: string },
+) {
+  await db
+    .prepare(
+      `
+        INSERT INTO tempo_http_keys (key_id, address, payload)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key_id) DO UPDATE SET
+          payload = excluded.payload,
+          address = excluded.address,
+          updated_at = CURRENT_TIMESTAMP
+      `,
+    )
+    .bind(params.keyId, params.address, params.payload)
+    .run();
+}
+
+async function loadTempoHttpKey(
+  db: D1Database,
+  params: { keyId: string; address: string },
+): Promise<{ key_id: string; address: string; payload: string } | null> {
+  const { results } = await db
+    .prepare(
+      `
+        SELECT key_id, address, payload
+        FROM tempo_http_keys
+        WHERE key_id = ? AND address = ?
+        LIMIT 1
+      `,
+    )
+    .bind(params.keyId, params.address)
+    .all<{ key_id: string; address: string; payload: string }>();
+
+  return results?.[0] ?? null;
 }
