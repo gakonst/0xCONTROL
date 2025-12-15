@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { FullScreenPlayer } from "@/components/fullscreen-player";
 import { LibraryFooter } from "@/components/library-footer";
 import { LibraryViewRouter } from "@/components/library-view-router";
+import { AuthGate } from "@/components/auth-gate";
 import { useMediaSession } from "@/hooks/use-media-session";
 import { useWaveform } from "@/hooks/use-waveform";
 import {
@@ -22,6 +23,14 @@ import type { Playlist } from "@/types/playlists";
 import { getInitialUrlState, type LibraryView } from "@/lib/library-state";
 
 function App() {
+  return (
+    <AuthGate>
+      <LibraryApp />
+    </AuthGate>
+  );
+}
+
+function LibraryApp() {
   const initialUrlState = getInitialUrlState();
 
   const { data: fetchedTracks } = useQuery({
