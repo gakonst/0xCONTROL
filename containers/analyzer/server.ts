@@ -22,6 +22,14 @@ type PseudoAudioBuffer = {
 
 type PcmData = { samples: Float32Array; sampleRate: number };
 
+type ProbeMetadata = {
+  title?: string;
+  artist?: string;
+  album?: string;
+  genre?: string;
+  durationSeconds?: number;
+};
+
 async function readBody(req: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
@@ -114,6 +122,87 @@ function toAudioBuffer(pcm: PcmData): PseudoAudioBuffer {
   };
 }
 
+function normalizeTagValue(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const normalized = String(value).trim();
+  return normalized.length ? normalized : undefined;
+}
+
+function pickTag(tags: Record<string, string> | undefined, keys: string[]): string | undefined {
+  if (!tags) return undefined;
+  for (const key of keys) {
+    const value = tags[key];
+    if (value) return value;
+  }
+  return undefined;
+}
+
+async function probeMetadata(input: Buffer): Promise<ProbeMetadata> {
+  return new Promise((resolve, reject) => {
+    const ffprobe = spawn("ffprobe", [
+      "-v",
+      "error",
+      "-print_format",
+      "json",
+      "-show_format",
+      "-show_streams",
+      "-i",
+      "pipe:0",
+    ]);
+
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+
+    ffprobe.stdout.on("data", (chunk) => stdout.push(chunk as Buffer));
+    ffprobe.stderr.on("data", (chunk) => stderr.push(chunk as Buffer));
+    ffprobe.on("error", (err) => reject(err));
+
+    ffprobe.on("close", (code) => {
+      if (code !== 0) {
+        return reject(
+          new Error(
+            `ffprobe exited with code ${code}: ${Buffer.concat(stderr).toString("utf8").slice(0, 4000)}`,
+          ),
+        );
+      }
+
+      try {
+        const raw = Buffer.concat(stdout).toString("utf8");
+        const parsed = JSON.parse(raw) as {
+          format?: { duration?: string; tags?: Record<string, unknown> };
+        };
+
+        const tagMap: Record<string, string> = {};
+        const tags = parsed.format?.tags ?? {};
+        for (const [key, value] of Object.entries(tags)) {
+          const normalizedKey = key.toLowerCase();
+          const normalizedValue = normalizeTagValue(value);
+          if (normalizedValue) {
+            tagMap[normalizedKey] = normalizedValue;
+          }
+        }
+
+        const durationRaw = parsed.format?.duration;
+        const duration = durationRaw ? Number.parseFloat(durationRaw) : NaN;
+        const durationSeconds = Number.isFinite(duration) ? duration : undefined;
+
+        resolve({
+          title: pickTag(tagMap, ["title", "tit2"]),
+          artist: pickTag(tagMap, ["artist", "album_artist", "tpe1"]),
+          album: pickTag(tagMap, ["album", "talb"]),
+          genre: pickTag(tagMap, ["genre", "tcon"]),
+          durationSeconds,
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    ffprobe.stdin.on("error", (err) => reject(err));
+    ffprobe.stdin.end(input);
+  });
+}
+
 async function handleAnalyze(req: IncomingMessage, res: ServerResponse, url: URL) {
   try {
     const resolutionParam = url.searchParams.get("resolution");
@@ -149,6 +238,25 @@ async function handleAnalyze(req: IncomingMessage, res: ServerResponse, url: URL
   }
 }
 
+async function handleMetadata(req: IncomingMessage, res: ServerResponse) {
+  try {
+    const body = await readBody(req);
+    if (!body || body.byteLength === 0) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Empty request body" }));
+      return;
+    }
+
+    const metadata = await probeMetadata(body);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(metadata));
+  } catch (error) {
+    console.error("Metadata probe failed", error);
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: (error as Error).message }));
+  }
+}
+
 createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://container");
 
@@ -160,6 +268,11 @@ createServer((req, res) => {
 
   if (req.method === "POST" && url.pathname === "/analyze") {
     void handleAnalyze(req, res, url);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/metadata") {
+    void handleMetadata(req, res);
     return;
   }
 

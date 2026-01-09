@@ -2,6 +2,8 @@ CREATE TABLE IF NOT EXISTS track_metadata (
   track_id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   artist TEXT NOT NULL,
+  album TEXT,
+  genre TEXT,
   duration_seconds INTEGER NOT NULL,
   bpm INTEGER NOT NULL,
   musical_key TEXT NOT NULL,

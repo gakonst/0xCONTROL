@@ -15,6 +15,8 @@ interface TrackRecord {
   path: string;
   name: string;
   artist?: string;
+  album?: string;
+  genre?: string;
   durationSeconds?: number;
   bpm?: number;
   key?: string;
@@ -30,6 +32,8 @@ interface TrackMetadataRow {
   track_id: string;
   name: string;
   artist: string;
+  album: string | null;
+  genre: string | null;
   duration_seconds: number | null;
   bpm: number | null;
   musical_key: string | null;
@@ -121,6 +125,23 @@ type AnalyzeRequestPayload = {
   preset?: PresetKey;
 };
 
+type AnalyzerMetadata = {
+  title?: string;
+  artist?: string;
+  album?: string;
+  genre?: string;
+  durationSeconds?: number;
+};
+
+type UploadResult = {
+  trackId: string;
+  status: "created" | "exists";
+  track: TrackRecord | null;
+  playlist: PlaylistRecord | null;
+  analyzed: boolean;
+  error?: string;
+};
+
 export class AnalyzerContainer extends Container {
   defaultPort = 3000;
   sleepAfter = "10m";
@@ -175,6 +196,102 @@ app.get("/api/catalog", requireAuth, async (c) => {
   return c.json(catalog, 200, {
     "Cache-Control": "no-store",
   });
+});
+
+app.post("/api/tracks/upload", async (c) => {
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    return c.text("Invalid form payload", 400);
+  }
+
+  const file = form.get("file");
+  if (!(file instanceof File)) {
+    return c.text("file is required", 400);
+  }
+
+  const rawTrackId = normalizeFormString(form.get("trackId"));
+  const fileName = typeof file.name === "string" ? file.name.trim() : "";
+  const trackId = rawTrackId ?? fileName;
+
+  if (!trackId) {
+    return c.text("trackId is required", 400);
+  }
+
+  const playlistTitle = normalizeFormString(form.get("playlist"));
+  const result = await handleTrackUpload(c.env, file, trackId, playlistTitle);
+
+  if (result.error) {
+    return c.json(result, 500);
+  }
+
+  return c.json(result, result.status === "created" ? 201 : 200);
+});
+
+app.post("/api/tracks/upload/bulk", async (c) => {
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    return c.text("Invalid form payload", 400);
+  }
+
+  const playlistTitle = normalizeFormString(form.get("playlist"));
+  const rawTrackIds = normalizeFormString(form.get("trackIds"));
+
+  let trackIds: string[] = [];
+  if (rawTrackIds) {
+    try {
+      const parsed = JSON.parse(rawTrackIds);
+      if (Array.isArray(parsed)) {
+        trackIds = parsed.map((entry) => String(entry));
+      }
+    } catch {
+      return c.text("trackIds must be a JSON array", 400);
+    }
+  }
+
+  const files = [
+    ...form.getAll("files"),
+    ...form.getAll("file"),
+  ].filter((entry) => entry instanceof File) as File[];
+
+  if (files.length === 0) {
+    return c.text("files are required", 400);
+  }
+
+  if (trackIds.length && trackIds.length !== files.length) {
+    return c.text("trackIds length must match files length", 400);
+  }
+
+  const results = await runWithConcurrency(files, 3, (file, index) => {
+    const rawTrackId = trackIds[index];
+    const fileName = typeof file.name === "string" ? file.name.trim() : "";
+    const trackId = rawTrackId ?? fileName;
+
+    if (!trackId) {
+      return Promise.resolve({
+        trackId: rawTrackId ?? "",
+        status: "exists",
+        track: null,
+        playlist: null,
+        analyzed: false,
+        error: "trackId is required",
+      });
+    }
+
+    return handleTrackUpload(c.env, file, trackId, playlistTitle);
+  });
+
+  const hasError = results.some((result) => result.error);
+
+  return c.json(
+    {
+      results,
+    },
+    hasError ? 207 : 200,
+  );
 });
 
 app.post("/api/analyze", requireAuth, async (c) => {
@@ -650,6 +767,8 @@ async function loadCatalogFromDb(db: D1Database): Promise<TrackRecord[]> {
       track_id,
       name,
       artist,
+      album,
+      genre,
       duration_seconds,
       bpm,
       musical_key,
@@ -671,6 +790,8 @@ function convertMetadataRowToTrack(row: TrackMetadataRow): TrackRecord {
     path: row.track_id,
     name: row.name,
     artist: row.artist,
+    album: row.album ?? undefined,
+    genre: row.genre ?? undefined,
     durationSeconds: row.duration_seconds ?? undefined,
     bpm: row.bpm ?? undefined,
     key: row.musical_key ?? undefined,
@@ -741,6 +862,109 @@ async function loadPlaylistById(
 ): Promise<PlaylistRecord | null> {
   const playlists = await loadPlaylistsFromDb(db, playlistId);
   return playlists[0] ?? null;
+}
+
+async function loadTrackById(
+  db: D1Database,
+  trackId: string,
+): Promise<TrackRecord | null> {
+  const statement = `
+    SELECT
+      track_id,
+      name,
+      artist,
+      album,
+      genre,
+      duration_seconds,
+      bpm,
+      musical_key,
+      annotation_color,
+      annotation_note
+    FROM track_metadata
+    WHERE track_id = ?
+    LIMIT 1
+  `;
+
+  const row = await db.prepare(statement).bind(trackId).first<TrackMetadataRow>();
+  return row ? convertMetadataRowToTrack(row) : null;
+}
+
+async function ensurePlaylistWithTrack(
+  db: D1Database,
+  title: string,
+  trackId: string,
+): Promise<PlaylistRecord | null> {
+  const existing = await findPlaylistByTitle(db, title);
+  const playlistId = existing ?? crypto.randomUUID();
+
+  if (!existing) {
+    const insert = await db
+      .prepare(
+        `
+          INSERT INTO playlists (
+            id,
+            title,
+            description,
+            mood,
+            tags,
+            accent_from,
+            accent_to,
+            cover,
+            folder_path,
+            is_pinned,
+            is_favorite
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .bind(
+        playlistId,
+        title,
+        "",
+        "",
+        null,
+        null,
+        null,
+        null,
+        null,
+        0,
+        0,
+      )
+      .run();
+
+    if (!insert.success) {
+      return null;
+    }
+  }
+
+  const position = await getNextPlaylistTrackPosition(db, playlistId);
+
+  const insertTrack = await db
+    .prepare(
+      `
+        INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position)
+        VALUES (?, ?, ?)
+      `,
+    )
+    .bind(playlistId, trackId, position)
+    .run();
+
+  if (insertTrack.success) {
+    await touchPlaylistUpdatedAt(db, playlistId);
+  }
+
+  return loadPlaylistById(db, playlistId);
+}
+
+async function findPlaylistByTitle(
+  db: D1Database,
+  title: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare("SELECT id FROM playlists WHERE title = ? ORDER BY created_at DESC LIMIT 1")
+    .bind(title)
+    .first<{ id: string }>();
+
+  return row?.id ?? null;
 }
 
 async function loadWaveformFromDb(
@@ -920,6 +1144,72 @@ async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
   }
 }
 
+async function analyzeTrackBuffer(
+  env: Env,
+  buffer: ArrayBuffer,
+  contentType: string,
+): Promise<{ waveform?: WaveformData; bpm?: number | null; beatOffsetSeconds?: number | null } | null> {
+  try {
+    const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
+    await analyzer.startAndWaitForPorts();
+
+    const analyzeUrl = new URL("http://container/analyze");
+    const analyzeResponse = await analyzer.fetch(
+      new Request(analyzeUrl, {
+        method: "POST",
+        headers: { "Content-Type": contentType },
+        body: buffer,
+      }),
+    );
+
+    if (!analyzeResponse.ok) {
+      console.warn("Analyzer failed for upload", analyzeResponse.status);
+      return null;
+    }
+
+    const body = await analyzeResponse.json<Record<string, unknown>>();
+    const waveform = body.waveform as WaveformData | undefined;
+    const bpm = (body.bpm as number | null | undefined) ?? null;
+    const beatOffsetSeconds =
+      (body.beatOffsetSeconds as number | null | undefined) ?? null;
+
+    return { waveform, bpm, beatOffsetSeconds };
+  } catch (error) {
+    console.warn("Analyzer upload failed", error);
+    return null;
+  }
+}
+
+async function fetchMetadataFromAnalyzer(
+  env: Env,
+  buffer: ArrayBuffer,
+  contentType: string,
+): Promise<AnalyzerMetadata> {
+  try {
+    const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
+    await analyzer.startAndWaitForPorts();
+
+    const metadataUrl = new URL("http://container/metadata");
+    const response = await analyzer.fetch(
+      new Request(metadataUrl, {
+        method: "POST",
+        headers: { "Content-Type": contentType },
+        body: buffer,
+      }),
+    );
+
+    if (!response.ok) {
+      console.warn("Metadata probe failed", response.status);
+      return {};
+    }
+
+    return (await response.json()) as AnalyzerMetadata;
+  } catch (error) {
+    console.warn("Metadata probe error", error);
+    return {};
+  }
+}
+
 function mapPlaylistRow(
   row: PlaylistRow,
   trackIds: string[],
@@ -972,6 +1262,204 @@ function normalizeOptionalString(value: unknown): string | null {
 
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function normalizeFormString(value: FormDataEntryValue | null): string | null {
+  if (!value || typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function normalizeDurationSeconds(value?: number): number | null {
+  if (typeof value !== "number" || Number.isNaN(value) || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.max(0, Math.round(value));
+}
+
+function parseTrackNameFromFilename(trackId: string): { title: string; artist?: string } {
+  const baseName = trackId.split("/").pop() ?? trackId;
+  const dotIndex = baseName.lastIndexOf(".");
+  const withoutExt = dotIndex > 0 ? baseName.slice(0, dotIndex) : baseName;
+  const parts = withoutExt.split(" - ");
+
+  if (parts.length >= 2) {
+    return {
+      artist: parts[0].trim(),
+      title: parts.slice(1).join(" - ").trim() || withoutExt,
+    };
+  }
+
+  return { title: withoutExt.trim() || trackId };
+}
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const current = nextIndex;
+      nextIndex += 1;
+      if (current >= items.length) return;
+      results[current] = await worker(items[current], current);
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
+}
+
+async function handleTrackUpload(
+  env: Env,
+  file: File,
+  trackId: string,
+  playlistTitle: string | null,
+): Promise<UploadResult> {
+  try {
+    const existingTrack = await loadTrackById(env.TRACKS_DB, trackId);
+    const existingWaveform = existingTrack
+      ? await loadWaveformFromDb(env.TRACKS_DB, trackId)
+      : null;
+
+    const uploadBuffer = await file.arrayBuffer();
+    const uploadContentType = file.type || inferContentTypeFromKey(trackId);
+
+    const candidates = buildTrackKeyCandidates(trackId);
+    let object: R2ObjectBody | null = null;
+    let objectKey: string | null = null;
+    for (const candidate of candidates) {
+      object = await env.TRACKS_BUCKET.get(candidate);
+      if (object) {
+        objectKey = candidate;
+        break;
+      }
+    }
+
+    if (!object) {
+      await env.TRACKS_BUCKET.put(trackId, uploadBuffer, {
+        httpMetadata: { contentType: uploadContentType },
+      });
+      objectKey = trackId;
+    }
+
+    const bufferForAnalysis = object ? await object.arrayBuffer() : uploadBuffer;
+    const contentTypeForAnalysis =
+      object?.httpMetadata?.contentType ??
+      uploadContentType ??
+      inferContentTypeFromKey(objectKey ?? trackId);
+
+    if (!existingTrack) {
+      const metadata = await fetchMetadataFromAnalyzer(
+        env,
+        bufferForAnalysis,
+        contentTypeForAnalysis,
+      );
+      const fallback = parseTrackNameFromFilename(trackId);
+      const name =
+        normalizeOptionalString(metadata.title) ??
+        normalizeOptionalString(fallback.title) ??
+        "Untitled Track";
+      const artist =
+        normalizeOptionalString(metadata.artist) ??
+        normalizeOptionalString(fallback.artist) ??
+        "Unknown Artist";
+      const album = normalizeOptionalString(metadata.album);
+      const genre = normalizeOptionalString(metadata.genre);
+      const durationSeconds = normalizeDurationSeconds(metadata.durationSeconds);
+
+      const insert = await env.TRACKS_DB.prepare(
+        `
+          INSERT INTO track_metadata (
+            track_id,
+            name,
+            artist,
+            album,
+            genre,
+            duration_seconds,
+            bpm,
+            musical_key,
+            annotation_color,
+            annotation_note
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+        .bind(
+          trackId,
+          name,
+          artist,
+          album,
+          genre,
+          durationSeconds ?? 0,
+          0,
+          "--",
+          null,
+          null,
+        )
+        .run();
+
+      if (!insert.success) {
+        return {
+          trackId,
+          status: "created",
+          track: null,
+          playlist: null,
+          analyzed: false,
+          error: "Failed to write track metadata",
+        };
+      }
+    }
+
+    let playlist: PlaylistRecord | null = null;
+    if (playlistTitle) {
+      playlist = await ensurePlaylistWithTrack(env.TRACKS_DB, playlistTitle, trackId);
+    }
+
+    let analysis: {
+      waveform?: WaveformData;
+      bpm?: number | null;
+      beatOffsetSeconds?: number | null;
+    } | null = null;
+
+    if (!existingWaveform) {
+      analysis = await analyzeTrackBuffer(env, bufferForAnalysis, contentTypeForAnalysis);
+      if (analysis?.waveform && Array.isArray(analysis.waveform.bars)) {
+        await saveWaveformToDb(env.TRACKS_DB, trackId, {
+          waveform: analysis.waveform,
+          bpm: analysis.bpm ?? null,
+          beatOffsetSeconds: analysis.beatOffsetSeconds ?? null,
+        });
+      }
+    }
+
+    const track = await loadTrackById(env.TRACKS_DB, trackId);
+
+    return {
+      trackId,
+      status: existingTrack ? "exists" : "created",
+      track,
+      playlist,
+      analyzed: Boolean(existingWaveform || analysis?.waveform),
+    };
+  } catch (error) {
+    return {
+      trackId,
+      status: "exists",
+      track: null,
+      playlist: null,
+      analyzed: false,
+      error: (error as Error).message,
+    };
+  }
 }
 
 async function getNextPlaylistTrackPosition(
