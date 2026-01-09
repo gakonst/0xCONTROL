@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import {
   addTrackToPlaylist as addTrackToPlaylistApi,
+  deletePlaylist as deletePlaylistApi,
   fetchPlaylists,
   removeTrackFromPlaylist as removeTrackFromPlaylistApi,
   updatePlaylistMeta,
@@ -36,6 +37,20 @@ export function usePlaylists() {
       return next;
     });
   }, []);
+
+  const deletePlaylist = useCallback(
+    (playlistId: string) => {
+      setPlaylists((previous) =>
+        previous.filter((playlist) => playlist.id !== playlistId),
+      );
+
+      void deletePlaylistApi(playlistId).catch((error) => {
+        console.error("Failed to delete playlist", error);
+        void refetchPlaylists();
+      });
+    },
+    [refetchPlaylists],
+  );
 
   const addTrackToPlaylist = useCallback(
     (playlistId: string, trackId: string) => {
@@ -146,6 +161,7 @@ export function usePlaylists() {
       removeTrackFromPlaylist,
       togglePlaylistPin,
       togglePlaylistFavorite,
+      deletePlaylist,
     },
   };
 }

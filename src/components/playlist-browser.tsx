@@ -28,7 +28,7 @@ type PlaylistBrowserProps = {
   onSortChange: (field: PlaylistSortField, direction: PlaylistSortDirection) => void;
   onSortReset: () => void;
   onTogglePin: (playlistId: string) => void;
-  onToggleFavorite: (playlistId: string) => void;
+  onDeletePlaylist: (playlistId: string) => void;
 };
 
 export function PlaylistBrowser({
@@ -42,9 +42,10 @@ export function PlaylistBrowser({
   onSortChange,
   onSortReset,
   onTogglePin,
-  onToggleFavorite,
+  onDeletePlaylist,
 }: PlaylistBrowserProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<Playlist | null>(null);
   const activeFolderPath = folderPath;
   const isSearching = searchQuery.trim().length > 0;
 
@@ -171,6 +172,20 @@ export function PlaylistBrowser({
 
   const handleResetSort = () => {
     onSortReset();
+  };
+
+  const handleRequestDelete = (playlist: Playlist) => {
+    setPendingDelete(playlist);
+  };
+
+  const handleCancelDelete = () => {
+    setPendingDelete(null);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!pendingDelete) return;
+    onDeletePlaylist(pendingDelete.id);
+    setPendingDelete(null);
   };
 
   const isEmpty = playlists.length === 0;
@@ -303,7 +318,7 @@ export function PlaylistBrowser({
         updatedLabel={formatRelativeDate(playlist.updatedAt)}
         fallbackInitial={fallbackInitial}
         onTogglePin={onTogglePin}
-        onToggleFavorite={onToggleFavorite}
+        onRequestDelete={handleRequestDelete}
         folderHint={folderHint}
       />
     );
@@ -321,7 +336,38 @@ export function PlaylistBrowser({
   }
 
   return (
-    <section className="flex h-full flex-col overflow-hidden bg-background shadow-[0_25px_120px_rgba(3,7,18,0.85)] backdrop-blur">
+    <section className="relative flex h-full flex-col overflow-hidden bg-background shadow-[0_25px_120px_rgba(3,7,18,0.85)] backdrop-blur">
+      {pendingDelete && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-md border border-white/10 bg-black/80 p-5 text-white shadow-[0_25px_60px_rgba(0,0,0,0.6)]">
+            <p className="text-sm font-semibold uppercase tracking-[0.12rem] text-white/70">
+              Delete playlist
+            </p>
+            <p className="mt-2 text-lg font-semibold text-white">
+              {pendingDelete.title}
+            </p>
+            <p className="mt-2 text-xs text-white/60">
+              This will remove the playlist and its track mapping. Tracks stay in your library.
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleCancelDelete}
+                className="border border-white/20 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12rem] text-white/70 transition hover:bg-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="border border-rose-400/70 bg-rose-500/20 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12rem] text-rose-100 transition hover:bg-rose-500/30"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <LibraryHeader
         title="Playlists"
         stats={statsParts}
@@ -430,7 +476,7 @@ type PlaylistListRowProps = {
   playlist: Playlist;
   onSelect: (playlistId: string) => void;
   onTogglePin: (playlistId: string) => void;
-  onToggleFavorite: (playlistId: string) => void;
+  onRequestDelete: (playlist: Playlist) => void;
   trackCount: number;
   durationLabel: string;
   updatedLabel: string;
@@ -442,7 +488,7 @@ function PlaylistListRow({
   playlist,
   onSelect,
   onTogglePin,
-  onToggleFavorite,
+  onRequestDelete,
   trackCount,
   durationLabel,
   updatedLabel,
@@ -494,7 +540,7 @@ function PlaylistListRow({
     if (delta > actionThreshold) {
       onTogglePin(playlist.id);
     } else if (delta < -actionThreshold) {
-      onToggleFavorite(playlist.id);
+      onRequestDelete(playlist);
     }
     if (Math.abs(delta) > 6) {
       suppressClickRef.current = true;
@@ -522,7 +568,7 @@ function PlaylistListRow({
   };
 
   const pinProgress = dragOffset > 0 ? Math.min(1, dragOffset / actionThreshold) : 0;
-  const favoriteProgress = dragOffset < 0 ? Math.min(1, -dragOffset / actionThreshold) : 0;
+  const deleteProgress = dragOffset < 0 ? Math.min(1, -dragOffset / actionThreshold) : 0;
 
   const secondaryLine = folderHint
     ? `${playlist.mood} • ${folderHint}`
@@ -536,8 +582,8 @@ function PlaylistListRow({
           style={{ opacity: pinProgress }}
         />
         <div
-          className="flex-1 bg-amber-400/25"
-          style={{ opacity: favoriteProgress }}
+          className="flex-1 bg-rose-500/25"
+          style={{ opacity: deleteProgress }}
         />
       </div>
       {pinProgress > 0 && (
@@ -545,9 +591,9 @@ function PlaylistListRow({
           📌
         </div>
       )}
-      {favoriteProgress > 0 && (
-        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-lg text-amber-200 md:pr-5">
-          ★
+      {deleteProgress > 0 && (
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-lg text-rose-100 md:pr-5">
+          🗑
         </div>
       )}
       <button
@@ -590,9 +636,6 @@ function PlaylistListRow({
               {playlist.title}
             </p>
             {playlist.isPinned && <span className="text-[0.7rem]">📌</span>}
-            {playlist.isFavorite && (
-              <span className="text-[0.7rem] text-amber-300">★</span>
-            )}
           </div>
           <p className="truncate text-[0.65rem] text-muted-foreground md:text-xs">
             {secondaryLine}

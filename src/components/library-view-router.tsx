@@ -50,7 +50,7 @@ export type LibraryViewRouterProps = {
   onFolderPathChange: Dispatch<SetStateAction<string[]>>;
   folderPath: string[];
   onTogglePin: (playlistId: string) => void;
-  onToggleFavorite: (playlistId: string) => void;
+  onDeletePlaylist: (playlistId: string) => void;
   header?: {
     title: string;
     backLabel?: string;
@@ -83,7 +83,7 @@ export function LibraryViewRouter({
   onFolderPathChange,
   folderPath,
   onTogglePin,
-  onToggleFavorite,
+  onDeletePlaylist,
   onPlaylistCreated,
   header,
   quickAddLabel,
@@ -129,7 +129,7 @@ export function LibraryViewRouter({
           onSortChange={handlePlaylistSortChange}
           onSortReset={handlePlaylistSortReset}
           onTogglePin={onTogglePin}
-          onToggleFavorite={onToggleFavorite}
+          onDeletePlaylist={onDeletePlaylist}
         />
       </Layer>
 

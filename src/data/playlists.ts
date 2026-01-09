@@ -104,6 +104,25 @@ export async function updatePlaylistMeta(
   return normalizePlaylist(payload.playlist);
 }
 
+export async function deletePlaylist(
+  playlistId: string,
+): Promise<{ playlistId: string }> {
+  const response = await fetch(
+    buildApiUrl(`/api/playlists/${encodeURIComponent(playlistId)}`),
+    {
+      method: "DELETE",
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to delete playlist (status ${response.status})`,
+    );
+  }
+
+  return (await response.json()) as { playlistId: string };
+}
+
 export async function addTrackToPlaylist(
   playlistId: string,
   trackId: string,

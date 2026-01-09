@@ -526,6 +526,36 @@ app.patch("/api/playlists/:playlistId", requireAuth, async (c) => {
   return c.json({ playlist });
 });
 
+app.delete("/api/playlists/:playlistId", requireAuth, async (c) => {
+  const playlistId = c.req.param("playlistId");
+  if (!playlistId) {
+    return c.text("Playlist identifier is required", 400);
+  }
+
+  const playlist = await loadPlaylistById(c.env.TRACKS_DB, playlistId);
+  if (!playlist) {
+    return c.text("Playlist not found", 404);
+  }
+
+  await c.env.TRACKS_DB.prepare(
+    "DELETE FROM playlist_tracks WHERE playlist_id = ?",
+  )
+    .bind(playlistId)
+    .run();
+
+  const removal = await c.env.TRACKS_DB.prepare(
+    "DELETE FROM playlists WHERE id = ?",
+  )
+    .bind(playlistId)
+    .run();
+
+  if (!removal.success || removal.changes === 0) {
+    return c.text("Playlist not found", 404);
+  }
+
+  return c.json({ playlistId });
+});
+
 app.post("/api/playlists/:playlistId/tracks", requireAuth, async (c) => {
   const playlistId = c.req.param("playlistId");
   if (!playlistId) {

@@ -42,12 +42,7 @@ function App() {
   const playlistsApi = usePlaylists();
   const playlists = playlistsApi.data;
   const setPlaylists = playlistsApi.setData;
-  const {
-    addTrackToPlaylist,
-    removeTrackFromPlaylist,
-    togglePlaylistFavorite,
-    togglePlaylistPin,
-  } = playlistsApi.actions;
+  const { togglePlaylistPin, deletePlaylist } = playlistsApi.actions;
   const [preferredPlaylistId, setPreferredPlaylistId] = useState<string | null>(
     null,
   );
@@ -218,7 +213,7 @@ function App() {
           onFolderPathChange={navigation.route.setFolderPath}
           folderPath={folderPath}
           onTogglePin={togglePlaylistPin}
-          onToggleFavorite={togglePlaylistFavorite}
+          onDeletePlaylist={deletePlaylist}
           header={trackListHeader}
           quickAddLabel={quickAddTargetPlaylist?.title}
           onQuickAddToPlaylist={handleQuickAddToPlaylist}
