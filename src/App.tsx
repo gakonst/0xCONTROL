@@ -205,37 +205,39 @@ function App() {
 
   return (
     <AppShell footer={footer}>
-      <LibraryViewRouter
-        navigation={navigation}
-        playlists={playlists}
-        tracks={tracks}
-        visibleTracks={visibleTracks}
-        activeTrackId={currentTrack?.id ?? ""}
-        onTrackSelect={handleTrackSelect}
-        onPlaylistSelect={handlePlaylistSelect}
-        onPlaylistCreated={handlePlaylistCreated}
-        onFolderPathChange={navigation.route.setFolderPath}
-        folderPath={folderPath}
-        onTogglePin={togglePlaylistPin}
-        onToggleFavorite={togglePlaylistFavorite}
-        header={trackListHeader}
-        quickAddLabel={quickAddTargetPlaylist?.title}
-        onQuickAddToPlaylist={handleQuickAddToPlaylist}
-        quickRemoveLabel={
-          currentView.type === "playlistDetail" && activePlaylist
-            ? activePlaylist.title
-            : undefined
-        }
-        onQuickRemoveFromPlaylist={handleQuickRemoveFromPlaylist}
-        annotations={annotations}
-        playback={{
-          trackId: currentTrack?.id ?? "",
-          isPlaying: playbackApi.state.isPlaying,
-          elapsedSeconds: playbackApi.state.elapsedSeconds,
-          durationSeconds: preferredDurationSeconds ?? undefined,
-          liveTimeGetter: playbackApi.liveTimeGetter,
-        }}
-      />
+      <div className="flex h-full min-h-full flex-col gap-4 px-4 pb-4">
+        <LibraryViewRouter
+          navigation={navigation}
+          playlists={playlists}
+          tracks={tracks}
+          visibleTracks={visibleTracks}
+          activeTrackId={currentTrack?.id ?? ""}
+          onTrackSelect={handleTrackSelect}
+          onPlaylistSelect={handlePlaylistSelect}
+          onPlaylistCreated={handlePlaylistCreated}
+          onFolderPathChange={navigation.route.setFolderPath}
+          folderPath={folderPath}
+          onTogglePin={togglePlaylistPin}
+          onToggleFavorite={togglePlaylistFavorite}
+          header={trackListHeader}
+          quickAddLabel={quickAddTargetPlaylist?.title}
+          onQuickAddToPlaylist={handleQuickAddToPlaylist}
+          quickRemoveLabel={
+            currentView.type === "playlistDetail" && activePlaylist
+              ? activePlaylist.title
+              : undefined
+          }
+          onQuickRemoveFromPlaylist={handleQuickRemoveFromPlaylist}
+          annotations={annotations}
+          playback={{
+            trackId: currentTrack?.id ?? "",
+            isPlaying: playbackApi.state.isPlaying,
+            elapsedSeconds: playbackApi.state.elapsedSeconds,
+            durationSeconds: preferredDurationSeconds ?? undefined,
+            liveTimeGetter: playbackApi.liveTimeGetter,
+          }}
+        />
+      </div>
 
       {isFullScreenPlayerOpen && currentTrack && (
         <FullScreenPlayer
