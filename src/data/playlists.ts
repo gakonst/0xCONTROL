@@ -31,7 +31,7 @@ type PlaylistMetaUpdates = {
   isFavorite?: boolean;
 };
 
-type CreatePlaylistInput = {
+export type CreatePlaylistInput = {
   title: string;
   description?: string;
   mood?: string;

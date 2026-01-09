@@ -60,6 +60,8 @@ export type LibraryViewRouterProps = {
   };
   quickAddLabel?: string;
   onQuickAddToPlaylist?: (trackId: string) => boolean;
+  quickArchiveLabel?: string;
+  onQuickArchiveToPlaylist?: (trackId: string) => boolean;
   quickRemoveLabel?: string;
   onQuickRemoveFromPlaylist?: (trackId: string) => boolean;
   annotations: Record<string, TrackAnnotation>;
@@ -88,6 +90,8 @@ export function LibraryViewRouter({
   header,
   quickAddLabel,
   onQuickAddToPlaylist,
+  quickArchiveLabel,
+  onQuickArchiveToPlaylist,
   quickRemoveLabel,
   onQuickRemoveFromPlaylist,
   annotations,
@@ -150,9 +154,20 @@ export function LibraryViewRouter({
           onSortReset={handleTrackSortReset}
           quickAddLabel={quickAddLabel}
           onQuickAddToPlaylist={onQuickAddToPlaylist}
+          quickArchiveLabel={quickArchiveLabel}
+          onQuickArchiveToPlaylist={onQuickArchiveToPlaylist}
           quickRemoveLabel={quickRemoveLabel}
           onQuickRemoveFromPlaylist={onQuickRemoveFromPlaylist}
           annotations={annotations}
+          emptyState={
+            view.type === "home"
+              ? {
+                  title: "No unassigned tracks",
+                  description:
+                    "Every track already lives in a playlist. Remove one from a playlist or make a new one to see it here.",
+                }
+              : undefined
+          }
           playback={playback}
         />
       </Layer>

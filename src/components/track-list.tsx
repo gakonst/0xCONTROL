@@ -33,9 +33,15 @@ type TrackListProps = {
   onSortReset?: () => void;
   quickAddLabel?: string;
   onQuickAddToPlaylist?: QuickActionHandler;
+  quickArchiveLabel?: string;
+  onQuickArchiveToPlaylist?: QuickActionHandler;
   quickRemoveLabel?: string;
   onQuickRemoveFromPlaylist?: QuickActionHandler;
   annotations?: Record<string, TrackAnnotation>;
+  emptyState?: {
+    title: string;
+    description?: string;
+  };
   playback?: {
     trackId: string;
     isPlaying: boolean;
@@ -86,9 +92,12 @@ export function TrackList({
   onSortReset,
   quickAddLabel,
   onQuickAddToPlaylist,
+  quickArchiveLabel,
+  onQuickArchiveToPlaylist,
   quickRemoveLabel,
   onQuickRemoveFromPlaylist,
   annotations,
+  emptyState,
   playback,
 }: TrackListProps) {
   const annotationMap = annotations ?? {};
@@ -110,6 +119,9 @@ export function TrackList({
     ? controlledSortDirection
     : uncontrolledSortDirection;
   const quickAddEnabled = typeof onQuickAddToPlaylist === "function";
+  const quickArchiveEnabled =
+    typeof onQuickArchiveToPlaylist === "function" &&
+    Boolean(quickArchiveLabel);
   const quickRemoveEnabled =
     typeof onQuickRemoveFromPlaylist === "function" &&
     Boolean(quickRemoveLabel);
@@ -161,6 +173,8 @@ export function TrackList({
   const totalDurationLabel = formatTotalDuration(sortedTracks);
   const isFilteredView =
     searchCriteria.hasFilters || sortedTracks.length !== annotatedTracks.length;
+  const showEmptyState =
+    sortedTracks.length === 0 && !isFilteredView && Boolean(emptyState);
 
   const updateSort = (field: TrackSortField, direction: TrackSortDirection) => {
     if (isSortControlled) {
@@ -305,23 +319,40 @@ export function TrackList({
             </div>
           </button>
         )}
-        {sortedTracks.map((track) => (
-          <TrackListRow
-            key={track.id}
-            track={track}
-            isActive={activeTrackId === track.id}
-            onSelect={onSelect}
-            onQuickAdd={quickAddEnabled ? onQuickAddToPlaylist : undefined}
-            onQuickRemove={
-              quickRemoveEnabled ? onQuickRemoveFromPlaylist : undefined
-            }
-            quickAddLabel={quickAddLabel}
-            quickRemoveLabel={quickRemoveLabel}
-            playback={
-              playback?.trackId === track.id ? playback : undefined
-            }
-          />
-        ))}
+        {showEmptyState ? (
+          <div className="mx-4 mt-10 rounded-none border border-white/10 bg-white/5 px-5 py-6 text-center text-white/80 md:mx-6">
+            <p className="text-sm font-semibold uppercase tracking-[0.12rem] text-white/80">
+              {emptyState?.title}
+            </p>
+            {emptyState?.description && (
+              <p className="mt-2 text-xs text-white/55">
+                {emptyState.description}
+              </p>
+            )}
+          </div>
+        ) : (
+          sortedTracks.map((track) => (
+            <TrackListRow
+              key={track.id}
+              track={track}
+              isActive={activeTrackId === track.id}
+              onSelect={onSelect}
+              onQuickAdd={quickAddEnabled ? onQuickAddToPlaylist : undefined}
+              onQuickArchive={
+                quickArchiveEnabled ? onQuickArchiveToPlaylist : undefined
+              }
+              onQuickRemove={
+                quickRemoveEnabled ? onQuickRemoveFromPlaylist : undefined
+              }
+              quickAddLabel={quickAddLabel}
+              quickArchiveLabel={quickArchiveLabel}
+              quickRemoveLabel={quickRemoveLabel}
+              playback={
+                playback?.trackId === track.id ? playback : undefined
+              }
+            />
+          ))
+        )}
       </div>
     </section>
   );
@@ -332,8 +363,10 @@ type TrackListRowProps = {
   isActive: boolean;
   onSelect: (track: Track) => void;
   onQuickAdd?: QuickActionHandler;
+  onQuickArchive?: QuickActionHandler;
   onQuickRemove?: QuickActionHandler;
   quickAddLabel?: string;
+  quickArchiveLabel?: string;
   quickRemoveLabel?: string;
   playback?: {
     trackId: string;
@@ -349,8 +382,10 @@ const TrackListRow = memo(function TrackListRow({
   isActive,
   onSelect,
   onQuickAdd,
+  onQuickArchive,
   onQuickRemove,
   quickAddLabel,
+  quickArchiveLabel,
   quickRemoveLabel,
   playback,
 }: TrackListRowProps) {
@@ -363,7 +398,9 @@ const TrackListRow = memo(function TrackListRow({
   const actionThreshold = 72;
   const maxOffset = 160;
   const canAdd = typeof onQuickAdd === "function";
+  const canArchive = Boolean(onQuickArchive && quickArchiveLabel);
   const canRemove = Boolean(onQuickRemove && quickRemoveLabel);
+  const leftAction = canRemove ? "remove" : canAdd ? "add" : null;
   const fallbackInitial =
     track.title.charAt(0).toUpperCase() ||
     track.artist.charAt(0).toUpperCase() ||
@@ -428,10 +465,14 @@ const TrackListRow = memo(function TrackListRow({
     resetDrag();
 
     let handled = false;
-    if (canAdd && delta > actionThreshold) {
-      handled = onQuickAdd?.(track.id) ?? false;
-    } else if (canRemove && delta < -actionThreshold) {
-      handled = onQuickRemove?.(track.id) ?? false;
+    if (delta < -actionThreshold) {
+      if (canRemove) {
+        handled = onQuickRemove?.(track.id) ?? false;
+      } else if (canAdd) {
+        handled = onQuickAdd?.(track.id) ?? false;
+      }
+    } else if (canArchive && delta > actionThreshold) {
+      handled = onQuickArchive?.(track.id) ?? false;
     }
 
     if (handled || Math.abs(delta) > 6) {
@@ -461,11 +502,11 @@ const TrackListRow = memo(function TrackListRow({
     onSelect(track);
   };
 
-  const addProgress = canAdd
-    ? Math.min(Math.max(dragOffset / actionThreshold, 0), 1)
-    : 0;
-  const removeProgress = canRemove
+  const leftProgress = leftAction
     ? Math.min(Math.max(-dragOffset / actionThreshold, 0), 1)
+    : 0;
+  const archiveProgress = canArchive
+    ? Math.min(Math.max(dragOffset / actionThreshold, 0), 1)
     : 0;
 
   const colorClass = (() => {
@@ -485,38 +526,47 @@ const TrackListRow = memo(function TrackListRow({
 
   return (
     <div ref={rowRef} className="relative overflow-hidden">
-      {(canAdd || canRemove) && (
+      {(leftAction || canArchive) && (
         <>
           <div className="pointer-events-none absolute inset-0 flex overflow-hidden">
             <div
-              className="flex-1 bg-emerald-500/15"
-              style={{ opacity: addProgress > 0 ? addProgress : 0 }}
+              className={
+                leftAction === "remove"
+                  ? "flex-1 bg-rose-500/15"
+                  : "flex-1 bg-emerald-500/15"
+              }
+              style={{ opacity: leftProgress > 0 ? leftProgress : 0 }}
             />
             <div
-              className="flex-1 bg-rose-500/15"
-              style={{ opacity: removeProgress > 0 ? removeProgress : 0 }}
+              className="flex-1 bg-amber-500/15"
+              style={{ opacity: archiveProgress > 0 ? archiveProgress : 0 }}
             />
           </div>
-          {canAdd && (
+          {leftAction && (
             <div
-              className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-emerald-100 md:pl-5"
+              className={cn(
+                "pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 md:pl-5",
+                leftAction === "remove" ? "text-rose-100" : "text-emerald-100",
+              )}
               style={{
-                opacity: addProgress > 0 ? Math.min(1, addProgress + 0.2) : 0,
+                opacity: leftProgress > 0 ? Math.min(1, leftProgress + 0.2) : 0,
               }}
             >
-              <span className="text-xl font-semibold">+</span>
+              <span className="text-xl font-semibold">
+                {leftAction === "remove" ? "-" : "+"}
+              </span>
             </div>
           )}
-          {canRemove && (
+          {canArchive && (
             <div
-              className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-rose-100 md:pr-5"
+              className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-amber-100 md:pr-5"
               style={{
-                opacity: removeProgress > 0
-                  ? Math.min(1, removeProgress + 0.2)
+                opacity: archiveProgress > 0
+                  ? Math.min(1, archiveProgress + 0.2)
                   : 0,
               }}
             >
-              <span className="text-xl font-semibold">-</span>
+              <span className="text-lg">🗄</span>
             </div>
           )}
         </>

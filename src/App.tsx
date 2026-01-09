@@ -126,6 +126,7 @@ function App() {
     handleTrackSelect,
     handlePlaylistSelect,
     handleQuickAddToPlaylist,
+    handleQuickArchiveToPlaylist,
     handleQuickRemoveFromPlaylist,
     trackListHeader,
   } = libraryActions;
@@ -217,12 +218,20 @@ function App() {
           header={trackListHeader}
           quickAddLabel={quickAddTargetPlaylist?.title}
           onQuickAddToPlaylist={handleQuickAddToPlaylist}
+          quickArchiveLabel={currentView.type === "home" ? "Archive" : undefined}
+          onQuickArchiveToPlaylist={
+            currentView.type === "home" ? handleQuickArchiveToPlaylist : undefined
+          }
           quickRemoveLabel={
             currentView.type === "playlistDetail" && activePlaylist
               ? activePlaylist.title
               : undefined
           }
-          onQuickRemoveFromPlaylist={handleQuickRemoveFromPlaylist}
+          onQuickRemoveFromPlaylist={
+            currentView.type === "playlistDetail"
+              ? handleQuickRemoveFromPlaylist
+              : undefined
+          }
           annotations={annotations}
           playback={{
             trackId: currentTrack?.id ?? "",

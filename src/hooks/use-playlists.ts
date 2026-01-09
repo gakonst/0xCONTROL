@@ -3,10 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 
 import {
   addTrackToPlaylist as addTrackToPlaylistApi,
+  createPlaylist as createPlaylistApi,
   deletePlaylist as deletePlaylistApi,
   fetchPlaylists,
   removeTrackFromPlaylist as removeTrackFromPlaylistApi,
   updatePlaylistMeta,
+  type CreatePlaylistInput,
 } from "@/data/playlists";
 import type { Playlist } from "@/types/playlists";
 
@@ -37,6 +39,21 @@ export function usePlaylists() {
       return next;
     });
   }, []);
+
+  const createPlaylist = useCallback(
+    async (input: CreatePlaylistInput) => {
+      try {
+        const playlist = await createPlaylistApi(input);
+        setPlaylists((previous) => [playlist, ...previous]);
+        return playlist;
+      } catch (error) {
+        console.error("Failed to create playlist", error);
+        void refetchPlaylists();
+        return null;
+      }
+    },
+    [refetchPlaylists],
+  );
 
   const deletePlaylist = useCallback(
     (playlistId: string) => {
@@ -161,6 +178,7 @@ export function usePlaylists() {
       removeTrackFromPlaylist,
       togglePlaylistPin,
       togglePlaylistFavorite,
+      createPlaylist,
       deletePlaylist,
     },
   };

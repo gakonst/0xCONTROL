@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import type { LibraryNavigationApi } from "@/hooks/use-library-navigation";
 import type { Track } from "@/data/tracks";
+import type { CreatePlaylistInput } from "@/data/playlists";
 import type { Playlist } from "@/types/playlists";
 import type { TrackAnnotation } from "@/types/annotations";
 
@@ -13,6 +14,7 @@ export type LibraryActionsDeps = {
   playlistsActions: {
     addTrackToPlaylist: (playlistId: string, trackId: string) => boolean;
     removeTrackFromPlaylist: (playlistId: string, trackId: string) => boolean;
+    createPlaylist: (input: CreatePlaylistInput) => Promise<Playlist | null>;
   };
   preferredPlaylistId: string | null;
   setPreferredPlaylistId: (id: string | null) => void;
@@ -50,6 +52,17 @@ export function useLibraryActions({
     return null;
   }, [navigation.route.view, activePlaylist, preferredPlaylistId, playlists]);
 
+  const playlistTrackIds = useMemo(() => {
+    if (!playlists.length) return new Set<string>();
+    const ids = new Set<string>();
+    for (const playlist of playlists) {
+      for (const trackId of playlist.trackIds) {
+        ids.add(trackId);
+      }
+    }
+    return ids;
+  }, [playlists]);
+
   const visibleTracks = useMemo(() => {
     if (navigation.route.view.type === "playlistDetail" && activePlaylist) {
       const trackMap = new Map(tracks.map((track) => [track.id, track]));
@@ -57,8 +70,12 @@ export function useLibraryActions({
         .map((id) => trackMap.get(id))
         .filter((track): track is Track => Boolean(track));
     }
+    if (navigation.route.view.type === "home") {
+      if (!playlistTrackIds.size) return tracks;
+      return tracks.filter((track) => !playlistTrackIds.has(track.id));
+    }
     return tracks;
-  }, [navigation.route.view, activePlaylist, tracks]);
+  }, [navigation.route.view, activePlaylist, tracks, playlistTrackIds]);
 
   const handleTrackSelect = useCallback(
     (track: Track) => {
@@ -114,6 +131,27 @@ export function useLibraryActions({
     [quickAddTargetPlaylist, playlists.length, navigation.route, playlistsActions],
   );
 
+  const handleQuickArchiveToPlaylist = useCallback(
+    (trackId: string) => {
+      const archive = playlists.find(
+        (playlist) => playlist.title.toLowerCase() === "archive",
+      );
+      if (archive) {
+        return playlistsActions.addTrackToPlaylist(archive.id, trackId);
+      }
+
+      void (async () => {
+        const created = await playlistsActions.createPlaylist({ title: "Archive" });
+        if (created) {
+          playlistsActions.addTrackToPlaylist(created.id, trackId);
+        }
+      })();
+
+      return true;
+    },
+    [playlists, playlistsActions],
+  );
+
   const handleQuickRemoveFromPlaylist = useMemo(() => {
     if (navigation.route.view.type === "playlistDetail" && activePlaylist) {
       return (trackId: string) => playlistsActions.removeTrackFromPlaylist(activePlaylist.id, trackId);
@@ -152,6 +190,7 @@ export function useLibraryActions({
     handleTrackSelect,
     handlePlaylistSelect,
     handleQuickAddToPlaylist,
+    handleQuickArchiveToPlaylist,
     handleQuickRemoveFromPlaylist,
     trackListHeader,
   };
