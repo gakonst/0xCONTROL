@@ -451,6 +451,20 @@ app.post("/api/streams/backfill", requireAuth, async (c) => {
   return c.json({ status: "completed", total: tracks.length, missing }, 200);
 });
 
+app.get("/api/streams/backfill/status", requireAuth, async (c) => {
+  const tracks = await loadCatalogFromDb(c.env.TRACKS_DB);
+  const missing = await findTracksMissingStreams(c.env, tracks);
+  return c.json(
+    {
+      status: "ready",
+      total: tracks.length,
+      missing: missing.length,
+      missingTracks: missing,
+    },
+    200,
+  );
+});
+
 app.get("/api/playlists", requireAuth, async (c) => {
   try {
     const playlists = await loadPlaylistsFromDb(c.env.TRACKS_DB);
