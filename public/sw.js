@@ -35,20 +35,26 @@ self.addEventListener('fetch', (event) => {
 
   if (request.mode === 'navigate') {
     event.respondWith(
-      caches.match('/index.html').then((cached) => {
-        if (cached) {
+      caches.match('/index.html').then(async (cached) => {
+        if (cached && cached.ok && !cached.redirected) {
           return cached
         }
 
-        return fetch('/index.html', { cache: 'reload' })
-          .then((response) => {
-            if (response && response.status === 200) {
-              const responseClone = response.clone()
-              caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', responseClone))
-            }
-            return response
-          })
-          .catch(() => caches.match('/index.html'))
+        try {
+          const response = await fetch('/index.html', { cache: 'reload', redirect: 'follow' })
+          const finalResponse = response.redirected
+            ? await fetch(response.url, { cache: 'reload' })
+            : response
+
+          if (finalResponse && finalResponse.status === 200 && !finalResponse.redirected) {
+            const responseClone = finalResponse.clone()
+            caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', responseClone))
+          }
+
+          return finalResponse
+        } catch (error) {
+          return caches.match('/index.html')
+        }
       }),
     )
     return
