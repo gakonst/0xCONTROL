@@ -20,6 +20,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "fft.js": "^4.0.4",
+    "hls.js": "^1.6.2",
     "hono": "^4.10.6",
     "lucide-react": "^0.553.0",
     "react": "^18.2.0",

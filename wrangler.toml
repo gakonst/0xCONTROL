@@ -31,7 +31,7 @@ database_name = "zero-control-tracks-preview"
 class_name = "AnalyzerContainer"
 image = "./containers/analyzer/Dockerfile"
 max_instances = 2
-instance_type = "standard-2"
+instance_type = "standard-4"
 
 [[env.preview.durable_objects.bindings]]
 name = "ANALYZER_CONTAINER"
@@ -65,7 +65,7 @@ R2_ACCOUNT_ID = "7fb82fc3b80331b2cd45f097acbd9ffc"
 class_name = "AnalyzerContainer"
 image = "./containers/analyzer/Dockerfile"
 max_instances = 2
-instance_type = "standard-2"
+instance_type = "standard-4"
 
 [[durable_objects.bindings]]
 name = "ANALYZER_CONTAINER"

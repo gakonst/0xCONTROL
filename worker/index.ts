@@ -181,45 +181,8 @@ type WorkerContext = { Bindings: Env };
 
 const app = new Hono<WorkerContext>();
 
-const ANALYZER_CONCURRENCY = 2;
 const AUDIO_EXTENSIONS = new Set([".mp3", ".m4a", ".flac", ".wav"]);
-
-const analyzerSemaphore = createSemaphore(ANALYZER_CONCURRENCY);
-
-function createSemaphore(limit: number) {
-  let available = limit;
-  const queue: Array<(release: () => void) => void> = [];
-
-  const acquire = () =>
-    new Promise<() => void>((resolve) => {
-      const grant = () => {
-        available -= 1;
-        resolve(() => {
-          available += 1;
-          const next = queue.shift();
-          if (next) next(grant);
-        });
-      };
-
-      if (available > 0) {
-        grant();
-        return;
-      }
-
-      queue.push(grant);
-    });
-
-  return { acquire };
-}
-
-async function withAnalyzerLock<T>(worker: () => Promise<T>): Promise<T> {
-  const release = await analyzerSemaphore.acquire();
-  try {
-    return await worker();
-  } finally {
-    release();
-  }
-}
+const STREAM_PREFIX = "streams";
 
 const requireAuth: MiddlewareHandler<WorkerContext> = async (c, next) => {
   const auth = await authenticateRequest(c);
@@ -375,7 +338,7 @@ app.post("/api/analyze", requireAuth, async (c) => {
   }
 
   try {
-    const analyzeResponse = await withAnalyzerLock(async () => {
+    const analyzeResponse = await (async () => {
       const analyzer = getContainer(c.env.ANALYZER_CONTAINER, "waveform");
       await analyzer.startAndWaitForPorts();
 
@@ -407,7 +370,7 @@ app.post("/api/analyze", requireAuth, async (c) => {
           body: JSON.stringify({ keys: candidateKeys }),
         }),
       );
-    });
+    })();
 
     if (analyzeResponse.status === 404) {
       return c.text("Track not found", 404);
@@ -435,6 +398,33 @@ app.post("/api/analyze", requireAuth, async (c) => {
     console.error("Failed to analyze track", error);
     return c.text("Analysis failed", 500);
   }
+});
+
+app.post("/api/streams/backfill", requireAuth, async (c) => {
+  const tracks = await loadCatalogFromDb(c.env.TRACKS_DB);
+  const backfillTask = transcodeMissingStreams(c.env, tracks);
+
+  if (c.executionCtx) {
+    c.executionCtx.waitUntil(backfillTask);
+    return c.json({ status: "started", total: tracks.length }, 202);
+  }
+
+  const missing = await backfillTask;
+  return c.json({ status: "completed", total: tracks.length, missing }, 200);
+});
+
+app.get("/api/streams/backfill/status", requireAuth, async (c) => {
+  const tracks = await loadCatalogFromDb(c.env.TRACKS_DB);
+  const missing = await findTracksMissingStreams(c.env, tracks);
+  return c.json(
+    {
+      status: "ready",
+      total: tracks.length,
+      missing: missing.length,
+      missingTracks: missing,
+    },
+    200,
+  );
 });
 
 app.get("/api/playlists", requireAuth, async (c) => {
@@ -815,7 +805,65 @@ const trackStreamHandler: MiddlewareHandler<WorkerContext> = async (c) => {
   }
 };
 
+async function serveStreamObject(
+  c: Parameters<MiddlewareHandler<WorkerContext>>[0],
+  trackId: string,
+  fileName: string,
+): Promise<Response> {
+  const streamKey = buildStreamObjectKey(trackId, fileName);
+
+  const rangeHeader = c.req.header("range");
+  const requestedRange = parseHttpRange(rangeHeader);
+  const getOptions = requestedRange ? { range: requestedRange } : undefined;
+
+  try {
+    const object = await c.env.TRACKS_BUCKET.get(streamKey, getOptions);
+    if (!object) {
+      return c.text("Stream not found", 404);
+    }
+
+    const { headers, status } = buildStreamResponseHeaders(object, {
+      isPartialRequest: Boolean(requestedRange),
+      fileName,
+    });
+
+    return new Response(object.body, { headers, status });
+  } catch (error) {
+    console.error("Failed to load stream asset", error);
+    return c.text("Unable to load stream asset", 500);
+  }
+}
+
+const streamAssetHandler: MiddlewareHandler<WorkerContext> = async (c) => {
+  const rawTrackId = c.req.param("trackId");
+  const rawFileName = c.req.param("file");
+  const fileName = normalizeStreamFileName(rawFileName);
+
+  if (!fileName) {
+    return c.text("Invalid stream file", 400);
+  }
+
+  const decodedTrackId = safeDecodeURIComponent(rawTrackId) ?? rawTrackId;
+  const trackId = normalizeStreamTrackId(decodedTrackId);
+  if (!trackId) {
+    return c.text("Invalid stream identifier", 400);
+  }
+  return serveStreamObject(c, trackId, fileName);
+};
+
+const streamPlaylistHandler: MiddlewareHandler<WorkerContext> = async (c) => {
+  const rawTrackId = c.req.param("trackId");
+  const decodedTrackId = safeDecodeURIComponent(rawTrackId) ?? rawTrackId;
+  const trackId = normalizeStreamTrackId(decodedTrackId);
+  if (!trackId) {
+    return c.text("Invalid stream identifier", 400);
+  }
+  return serveStreamObject(c, trackId, "index.m3u8");
+};
+
 app.get("/api/tracks/:trackId", requireAuth, trackStreamHandler);
+app.get("/api/tracks/:trackId/stream", requireAuth, streamPlaylistHandler);
+app.get("/api/streams/:trackId/:file", requireAuth, streamAssetHandler);
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
@@ -840,10 +888,11 @@ export default {
       try {
         for (const key of keys) {
           await analyzeTrackFromQueue(env, key);
+          await ensureStreamFromQueue(env, key);
         }
         message.ack();
       } catch (error) {
-        console.warn("Queue analysis failed", error);
+        console.warn("Queue processing failed", error);
         message.retry();
       }
     }
@@ -851,6 +900,7 @@ export default {
   async scheduled(controller, env, ctx): Promise<void> {
     console.log("Scheduled backfill start", { schedule: controller.cron });
     ctx.waitUntil(runScheduledWaveformBackfill(env));
+    ctx.waitUntil(runScheduledStreamBackfill(env));
   },
 } satisfies ExportedHandler<Env>;
 
@@ -880,6 +930,19 @@ async function runScheduledWaveformBackfill(env: Env): Promise<void> {
     await analyzeMissingTracks(env, tracks);
   } catch (error) {
     console.error("Scheduled waveform backfill failed", error);
+  }
+}
+
+async function runScheduledStreamBackfill(env: Env): Promise<void> {
+  try {
+    const tracks = await loadCatalogFromDb(env.TRACKS_DB);
+    const missing = await transcodeMissingStreams(env, tracks);
+    console.log("Scheduled stream backfill complete", {
+      total: tracks.length,
+      missing,
+    });
+  } catch (error) {
+    console.error("Scheduled stream backfill failed", error);
   }
 }
 
@@ -1213,7 +1276,7 @@ async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
     const keyCandidates = buildTrackKeyCandidates(record?.path ?? trackId);
 
     try {
-      const body = await withAnalyzerLock(async () => {
+      const body = await (async () => {
         const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
         await analyzer.startAndWaitForPorts();
 
@@ -1264,7 +1327,7 @@ async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
           });
           return null;
         }
-      });
+      })();
 
       if (!body) {
         continue;
@@ -1288,6 +1351,51 @@ async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
   }
 }
 
+async function findTracksMissingStreams(
+  env: Env,
+  tracks: TrackRecord[],
+): Promise<string[]> {
+  if (!tracks.length) return [];
+
+  const results = await runWithConcurrency(tracks, 5, async (track) => {
+    const streamKey = buildStreamObjectKey(track.id, "index.m3u8");
+    try {
+      const existing = await env.TRACKS_BUCKET.head(streamKey);
+      return existing ? null : track.id;
+    } catch (error) {
+      console.warn("Stream backfill head failed", track.id, error);
+      return track.id;
+    }
+  });
+
+  return results.filter((trackId): trackId is string => Boolean(trackId));
+}
+
+async function transcodeMissingStreams(
+  env: Env,
+  tracks: TrackRecord[],
+): Promise<number> {
+  if (!tracks.length) return 0;
+
+  const missing = await findTracksMissingStreams(env, tracks);
+  if (!missing.length) return 0;
+
+  const trackLookup = new Map(tracks.map((track) => [track.id, track]));
+
+  for (const trackId of missing) {
+    const record = trackLookup.get(trackId);
+    const keyCandidates = buildTrackKeyCandidates(record?.path ?? trackId);
+
+    try {
+      await transcodeTrackByKeys(env, trackId, keyCandidates);
+    } catch (error) {
+      console.warn("Stream backfill failed", trackId, error);
+    }
+  }
+
+  return missing.length;
+}
+
 async function analyzeTrackByKeys(
   env: Env,
   keys: string[],
@@ -1297,7 +1405,7 @@ async function analyzeTrackByKeys(
   }
 
   try {
-    return await withAnalyzerLock(async () => {
+    return await (async () => {
       const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
       await analyzer.startAndWaitForPorts();
 
@@ -1365,7 +1473,7 @@ async function analyzeTrackByKeys(
         (body.beatOffsetSeconds as number | null | undefined) ?? null;
 
       return { waveform, bpm, beatOffsetSeconds };
-    });
+    })();
   } catch (error) {
     console.warn("Analyzer upload failed", error);
     return null;
@@ -1381,7 +1489,7 @@ async function fetchMetadataFromAnalyzer(
   }
 
   try {
-    return await withAnalyzerLock(async () => {
+    return await (async () => {
       const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
       await analyzer.startAndWaitForPorts();
 
@@ -1405,7 +1513,7 @@ async function fetchMetadataFromAnalyzer(
       }
 
       return (await response.json()) as AnalyzerMetadata;
-    });
+    })();
   } catch (error) {
     console.warn("Metadata probe error", error);
     return {};
@@ -1687,6 +1795,55 @@ async function analyzeTrackFromQueue(env: Env, objectKey: string): Promise<void>
   });
 }
 
+async function ensureStreamFromQueue(env: Env, objectKey: string): Promise<void> {
+  if (!isAudioObjectKey(objectKey)) {
+    return;
+  }
+
+  const trackId = normalizeTrackIdFromObjectKey(objectKey);
+  if (!trackId) {
+    return;
+  }
+
+  const streamKey = buildStreamObjectKey(trackId, "index.m3u8");
+  const existing = await env.TRACKS_BUCKET.head(streamKey);
+  if (existing) {
+    return;
+  }
+
+  const keyCandidates = buildTrackKeyCandidates(objectKey);
+  await transcodeTrackByKeys(env, trackId, keyCandidates);
+}
+
+async function transcodeTrackByKeys(
+  env: Env,
+  trackId: string,
+  keyCandidates: string[],
+): Promise<void> {
+  const transcodeResponse = await (async () => {
+    const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
+    await analyzer.startAndWaitForPorts();
+
+    return analyzer.fetch(
+      new Request("http://container/transcode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keys: keyCandidates, trackId }),
+      }),
+    );
+  })();
+
+  if (transcodeResponse.status === 404) {
+    return;
+  }
+
+  if (!transcodeResponse.ok) {
+    const text = await transcodeResponse.text();
+    console.error("Stream transcode failed", text);
+    throw new Error("Stream transcode failed");
+  }
+}
+
 function extractR2EventKeys(body: unknown): string[] {
   let payload = body;
   if (typeof payload === "string") {
@@ -1901,9 +2058,75 @@ function buildTrackResponseHeaders(
   return { headers, status };
 }
 
+function buildStreamResponseHeaders(
+  object: R2ObjectBody,
+  options: { isPartialRequest: boolean; fileName: string },
+): { headers: Headers; status: number } {
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+
+  const contentType =
+    object.httpMetadata?.contentType ?? inferContentTypeFromKey(object.key);
+  headers.set("Content-Type", contentType);
+  headers.set("Accept-Ranges", "bytes");
+
+  const isPlaylist = options.fileName.toLowerCase().endsWith(".m3u8");
+  headers.set(
+    "Cache-Control",
+    isPlaylist ? "private, max-age=0, must-revalidate" : "public, max-age=31536000, immutable",
+  );
+
+  const contentLength = object.range?.length ?? object.size;
+  headers.set("Content-Length", contentLength.toString());
+
+  let status = 200;
+
+  if (options.isPartialRequest && object.range) {
+    const offset =
+      "offset" in object.range && typeof object.range.offset === "number"
+        ? object.range.offset
+        : Math.max(0, object.size - contentLength);
+    const end = offset + contentLength - 1;
+    headers.set("Content-Range", `bytes ${offset}-${end}/${object.size}`);
+    status = 206;
+  }
+
+  return { headers, status };
+}
+
+function normalizeStreamFileName(fileName?: string | null): string | null {
+  if (!fileName) return null;
+  const trimmed = fileName.trim();
+  if (!trimmed || trimmed.includes("/") || trimmed.includes("\\")) {
+    return null;
+  }
+  if (trimmed.includes("..")) return null;
+  return trimmed;
+}
+
+function normalizeStreamTrackId(trackId?: string | null): string | null {
+  if (!trackId) return null;
+  const trimmed = trackId.trim();
+  if (!trimmed || trimmed.includes("/") || trimmed.includes("\\")) {
+    return null;
+  }
+  if (trimmed.includes("..")) return null;
+  return trimmed;
+}
+
+function buildStreamObjectKey(trackId: string, fileName: string): string {
+  return `${STREAM_PREFIX}/${trackId}/${fileName}`;
+}
+
 function inferContentTypeFromKey(key: string): string {
   const extension = key.split(".").pop()?.toLowerCase();
   switch (extension) {
+    case "m3u8":
+      return "application/vnd.apple.mpegurl";
+    case "m4s":
+      return "video/iso.segment";
+    case "aac":
+      return "audio/aac";
     case "mp3":
       return "audio/mpeg";
     case "m4a":

@@ -1,6 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { join, normalize, sep } from "node:path";
 import {
   analyzeWaveformFromBuffer,
@@ -15,6 +15,7 @@ const PORT = Number(process.env.PORT ?? 3000);
 const MAX_INPUT_BYTES = 120 * 1024 * 1024; // ~120MB safety guard
 const R2_MOUNT_PATH = process.env.R2_MOUNT_PATH ?? "/mnt/r2";
 const NORMALIZED_MOUNT_PATH = normalize(R2_MOUNT_PATH);
+const STREAM_PREFIX = "streams";
 
 type PseudoAudioBuffer = {
   length: number;
@@ -38,6 +39,12 @@ type AnalyzePathRequest = {
   keys?: string[];
   trackId?: string;
   path?: string;
+};
+
+type TranscodeRequest = {
+  keys?: string[];
+  trackId?: string;
+  segmentSeconds?: number;
 };
 
 const RESPONSE_CHUNK_SIZE = 64 * 1024;
@@ -98,6 +105,30 @@ function normalizeKeyInput(payload: AnalyzePathRequest | null): string[] {
     }
   }
   return Array.from(keys);
+}
+
+function sanitizeStreamId(raw?: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("..")) {
+    return null;
+  }
+  return trimmed;
+}
+
+function deriveStreamId(keys: string[], rawTrackId?: string | null): string | null {
+  const direct = sanitizeStreamId(rawTrackId ?? undefined);
+  if (direct) return direct;
+  const fallback = keys[0]?.split("/").filter(Boolean).pop();
+  return sanitizeStreamId(fallback ?? null);
+}
+
+function resolveStreamOutputDir(streamId: string): string | null {
+  const candidate = normalize(join(NORMALIZED_MOUNT_PATH, STREAM_PREFIX, streamId));
+  if (candidate === NORMALIZED_MOUNT_PATH) return null;
+  if (!candidate.startsWith(NORMALIZED_MOUNT_PATH + sep)) return null;
+  return candidate;
 }
 
 async function logMountStatus() {
@@ -169,6 +200,45 @@ async function readFromMountedR2(keys: string[]): Promise<{ buffer: Buffer; key:
   }
 
   console.warn(`[analyzer] mount lookup complete no match`);
+  return null;
+}
+
+async function findMountedFile(keys: string[]): Promise<{ path: string; key: string } | null> {
+  console.log(
+    `[analyzer] stream lookup start keys=${keys.length} mount=${NORMALIZED_MOUNT_PATH}`,
+  );
+
+  for (const key of keys) {
+    const candidatePath = resolveMountedPath(key);
+    if (!candidatePath) {
+      console.warn(`[analyzer] stream lookup skip invalid key=${key}`);
+      continue;
+    }
+
+    try {
+      console.log(`[analyzer] stream lookup try key=${key} path=${candidatePath}`);
+      const info = await stat(candidatePath);
+      if (!info.isFile()) {
+        console.warn(`[analyzer] stream lookup not-file path=${candidatePath}`);
+        continue;
+      }
+      console.log(`[analyzer] stream lookup hit key=${key} size=${info.size}`);
+      return { path: candidatePath, key };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        console.warn(`[analyzer] stream lookup miss path=${candidatePath}`);
+        continue;
+      }
+      console.error(
+        `[analyzer] stream lookup error path=${candidatePath} code=${code ?? "unknown"}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  console.warn(`[analyzer] stream lookup complete no match`);
   return null;
 }
 
@@ -511,6 +581,148 @@ async function handleMetadata(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
+function transcodeToHls(
+  inputPath: string,
+  outputDir: string,
+  segmentSeconds: number,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const playlistPath = join(outputDir, "index.m3u8");
+    const segmentPattern = join(outputDir, "segment_%05d.m4s");
+
+    const args = [
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      inputPath,
+      "-vn",
+      "-acodec",
+      "aac",
+      "-b:a",
+      "192k",
+      "-ac",
+      "2",
+      "-ar",
+      "48000",
+      "-f",
+      "hls",
+      "-hls_time",
+      String(segmentSeconds),
+      "-hls_playlist_type",
+      "vod",
+      "-hls_segment_type",
+      "fmp4",
+      "-hls_flags",
+      "independent_segments",
+      "-hls_fmp4_init_filename",
+      "init.mp4",
+      "-hls_segment_filename",
+      segmentPattern,
+      playlistPath,
+    ];
+
+    const ffmpeg = spawn("ffmpeg", args);
+    const stderr: Buffer[] = [];
+
+    ffmpeg.stderr.on("data", (chunk) => stderr.push(chunk as Buffer));
+    ffmpeg.on("error", reject);
+    ffmpeg.on("close", (code) => {
+      if (code !== 0) {
+        reject(
+          new Error(
+            `ffmpeg exited with code ${code}: ${Buffer.concat(stderr).toString("utf8").slice(0, 4000)}`,
+          ),
+        );
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function handleTranscode(req: IncomingMessage, res: ServerResponse) {
+  const startedAt = Date.now();
+  const contentType = req.headers["content-type"] ?? "";
+  const contentLength = req.headers["content-length"] ?? "";
+
+  try {
+    console.log(
+      `[analyzer] transcode start contentType=${contentType} contentLength=${contentLength}`,
+    );
+
+    const body = await readBody(req);
+    if (!body || body.byteLength === 0) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Empty request body" }));
+      return;
+    }
+
+    let payload: TranscodeRequest | null = null;
+    try {
+      payload = JSON.parse(body.toString("utf8")) as TranscodeRequest;
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid JSON payload" }));
+      return;
+    }
+
+    const keys = normalizeKeyInput(payload as AnalyzePathRequest);
+    if (!keys.length) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "trackId, path, or keys is required" }));
+      return;
+    }
+
+    const streamId = deriveStreamId(keys, payload?.trackId ?? null);
+    if (!streamId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid trackId" }));
+      return;
+    }
+
+    const outputDir = resolveStreamOutputDir(streamId);
+    if (!outputDir) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid output path" }));
+      return;
+    }
+
+    const source = await findMountedFile(keys);
+    if (!source) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Track not found" }));
+      return;
+    }
+
+    const segmentSecondsRaw = payload?.segmentSeconds;
+    const segmentSeconds =
+      typeof segmentSecondsRaw === "number" && Number.isFinite(segmentSecondsRaw)
+        ? Math.min(15, Math.max(2, Math.round(segmentSecondsRaw)))
+        : 6;
+
+    await mkdir(outputDir, { recursive: true });
+    await transcodeToHls(source.path, outputDir, segmentSeconds);
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        streamId,
+        playlistKey: `${STREAM_PREFIX}/${streamId}/index.m3u8`,
+      }),
+    );
+    console.log(
+      `[analyzer] transcode success key=${source.key} streamId=${streamId} elapsedMs=${Date.now() - startedAt}`,
+    );
+  } catch (error) {
+    console.error("[analyzer] transcode failed", error);
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: (error as Error).message }));
+  }
+}
+
 createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://container");
 
@@ -535,6 +747,11 @@ createServer((req, res) => {
 
   if (req.method === "POST" && url.pathname === "/metadata") {
     void handleMetadata(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/transcode") {
+    void handleTranscode(req, res);
     return;
   }
 

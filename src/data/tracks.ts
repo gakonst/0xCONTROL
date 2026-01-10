@@ -201,3 +201,15 @@ export function getTrackUrl(trackId: string): string {
 
   return buildApiUrl(`/api/tracks/${encodedId}`);
 }
+
+export function getTrackStreamUrl(trackId: string): string {
+  const encodedId = encodeURIComponent(trackId);
+  if (shouldUseR2DevServer()) {
+    return `${R2_DEV_SERVER_URL}/streams/${encodedId}/index.m3u8`;
+  }
+  if (SHOULD_USE_LOCAL_TRACKS) {
+    return `/tracks/${encodedId}`;
+  }
+
+  return buildApiUrl(`/api/streams/${encodedId}/index.m3u8`);
+}

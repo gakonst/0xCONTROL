@@ -7,7 +7,9 @@ import {
   type MutableRefObject,
 } from "react";
 
-import { getTrackUrl, type Track } from "@/data/tracks";
+import Hls from "hls.js";
+
+import { getTrackStreamUrl, getTrackUrl, type Track } from "@/data/tracks";
 
 type PlaybackController = {
   currentTrackId: string;
@@ -44,6 +46,7 @@ export function usePlaybackController(
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const trackUrlRef = useRef<string>("");
+  const hlsRef = useRef<Hls | null>(null);
   const goToNextTrackRef = useRef<() => void>(() => {});
   const tracksRef = useRef<Track[]>(tracks);
 
@@ -150,6 +153,8 @@ export function usePlaybackController(
 
   useEffect(() => () => {
     audioRef.current?.pause();
+    hlsRef.current?.destroy();
+    hlsRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -167,14 +172,66 @@ export function usePlaybackController(
     const audio = ensureAudio();
     if (!audio) return;
 
-    const trackUrl = getTrackUrl(currentTrack.id);
-    if (trackUrlRef.current !== trackUrl) {
-      trackUrlRef.current = trackUrl;
+    const streamUrl = getTrackStreamUrl(currentTrack.id);
+    const fallbackUrl = getTrackUrl(currentTrack.id);
+
+    const useDirectUrl = (nextUrl: string) => {
+      if (trackUrlRef.current === nextUrl) return;
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      trackUrlRef.current = nextUrl;
       setIsBuffering(true);
       setElapsedSeconds(0);
       setDurationSeconds(null);
-      audio.src = trackUrl;
+      audio.src = nextUrl;
       audio.load();
+    };
+
+    const useHls = () => {
+      if (trackUrlRef.current === streamUrl && hlsRef.current) return;
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+
+      const hls = new Hls({ enableWorker: true });
+      hlsRef.current = hls;
+      trackUrlRef.current = streamUrl;
+      setIsBuffering(true);
+      setElapsedSeconds(0);
+      setDurationSeconds(null);
+
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (!data.fatal) return;
+        console.warn("HLS playback failed, falling back", data);
+        useDirectUrl(fallbackUrl);
+      });
+
+      hls.loadSource(streamUrl);
+      hls.attachMedia(audio);
+    };
+
+    const canPlayNativeHls =
+      audio.canPlayType("application/vnd.apple.mpegurl") !== "" ||
+      audio.canPlayType("application/x-mpegURL") !== "";
+
+    const handleError = () => {
+      if (trackUrlRef.current === streamUrl) {
+        console.warn("Stream unavailable, falling back to MP3");
+        useDirectUrl(fallbackUrl);
+      }
+    };
+
+    audio.addEventListener("error", handleError);
+
+    if (Hls.isSupported()) {
+      useHls();
+    } else if (canPlayNativeHls) {
+      useDirectUrl(streamUrl);
+    } else {
+      useDirectUrl(fallbackUrl);
     }
 
     if (isPlaying) {
@@ -188,6 +245,10 @@ export function usePlaybackController(
     } else {
       audio.pause();
     }
+
+    return () => {
+      audio.removeEventListener("error", handleError);
+    };
   }, [currentTrack, currentTrackId, isPlaying]);
 
   const handleTogglePlay = useCallback(() => {
