@@ -22,3 +22,9 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     </WagmiProvider>
   </React.StrictMode>,
 )
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => undefined)
+  })
+}
