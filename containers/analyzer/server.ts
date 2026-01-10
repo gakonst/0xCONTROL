@@ -1,5 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
+import { readFile, readdir, stat } from "node:fs/promises";
+import { join, normalize, sep } from "node:path";
 import {
   analyzeWaveformFromBuffer,
   applyPresetToWaveform,
@@ -11,6 +13,8 @@ import {
 
 const PORT = Number(process.env.PORT ?? 3000);
 const MAX_INPUT_BYTES = 120 * 1024 * 1024; // ~120MB safety guard
+const R2_MOUNT_PATH = process.env.R2_MOUNT_PATH ?? "/mnt/r2";
+const NORMALIZED_MOUNT_PATH = normalize(R2_MOUNT_PATH);
 
 type PseudoAudioBuffer = {
   length: number;
@@ -30,11 +34,34 @@ type ProbeMetadata = {
   durationSeconds?: number;
 };
 
+type AnalyzePathRequest = {
+  keys?: string[];
+  trackId?: string;
+  path?: string;
+};
+
+const RESPONSE_CHUNK_SIZE = 64 * 1024;
+
+function writeJsonChunked(res: ServerResponse, payload: unknown) {
+  const json = JSON.stringify(payload);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  for (let offset = 0; offset < json.length; offset += RESPONSE_CHUNK_SIZE) {
+    res.write(json.slice(offset, offset + RESPONSE_CHUNK_SIZE));
+  }
+  res.end();
+  return json.length;
+}
+
 async function readBody(req: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
 
   return new Promise((resolve, reject) => {
+    req.on("aborted", () => {
+      console.error("[analyzer] request aborted while reading body");
+      reject(new Error("Request aborted"));
+    });
+
     req.on("data", (chunk: Buffer) => {
       total += chunk.byteLength;
       if (total > MAX_INPUT_BYTES) {
@@ -50,11 +77,110 @@ async function readBody(req: IncomingMessage): Promise<Buffer> {
   });
 }
 
+function resolveMountedPath(key: string): string | null {
+  const trimmed = key.replace(/^\/+/, "").trim();
+  if (!trimmed) return null;
+  const candidate = normalize(join(NORMALIZED_MOUNT_PATH, trimmed));
+  if (candidate === NORMALIZED_MOUNT_PATH) return null;
+  if (!candidate.startsWith(NORMALIZED_MOUNT_PATH + sep)) return null;
+  return candidate;
+}
+
+function normalizeKeyInput(payload: AnalyzePathRequest | null): string[] {
+  const keys = new Set<string>();
+  if (payload?.trackId) keys.add(payload.trackId);
+  if (payload?.path) keys.add(payload.path);
+  if (Array.isArray(payload?.keys)) {
+    for (const entry of payload.keys) {
+      if (typeof entry === "string" && entry.trim()) {
+        keys.add(entry);
+      }
+    }
+  }
+  return Array.from(keys);
+}
+
+async function logMountStatus() {
+  try {
+    const info = await stat(NORMALIZED_MOUNT_PATH);
+    const kind = info.isDirectory() ? "dir" : info.isFile() ? "file" : "other";
+    console.log(
+      `[analyzer] mount status path=${NORMALIZED_MOUNT_PATH} kind=${kind} size=${info.size}`,
+    );
+
+    if (info.isDirectory()) {
+      const entries = await readdir(NORMALIZED_MOUNT_PATH);
+      const sample = entries.slice(0, 10).join(", ");
+      console.log(
+        `[analyzer] mount entries count=${entries.length} sample=${sample || "(empty)"}`,
+      );
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? "unknown";
+    console.warn(
+      `[analyzer] mount status error path=${NORMALIZED_MOUNT_PATH} code=${code}`,
+      error,
+    );
+  }
+}
+
+async function readFromMountedR2(keys: string[]): Promise<{ buffer: Buffer; key: string } | null> {
+  console.log(
+    `[analyzer] mount lookup start keys=${keys.length} mount=${NORMALIZED_MOUNT_PATH}`,
+  );
+
+  for (const key of keys) {
+    const candidatePath = resolveMountedPath(key);
+    if (!candidatePath) {
+      console.warn(`[analyzer] mount lookup skip invalid key=${key}`);
+      continue;
+    }
+
+    try {
+      console.log(`[analyzer] mount lookup try key=${key} path=${candidatePath}`);
+      const info = await stat(candidatePath);
+      if (!info.isFile()) {
+        console.warn(`[analyzer] mount lookup not-file path=${candidatePath}`);
+        continue;
+      }
+      if (info.size > MAX_INPUT_BYTES) {
+        console.warn(
+          `[analyzer] mount lookup too-large path=${candidatePath} size=${info.size}`,
+        );
+        throw new Error("Input too large");
+      }
+      const buffer = await readFile(candidatePath);
+      console.log(
+        `[analyzer] mount lookup hit key=${key} bytes=${buffer.byteLength}`,
+      );
+      return { buffer, key };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        console.warn(`[analyzer] mount lookup miss path=${candidatePath}`);
+        continue;
+      }
+      console.error(
+        `[analyzer] mount lookup error path=${candidatePath} code=${code ?? "unknown"}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  console.warn(`[analyzer] mount lookup complete no match`);
+  return null;
+}
+
 function decodeToPCM(input: Buffer): Promise<PcmData> {
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn("ffmpeg", [
       "-v",
       "error",
+      "-err_detect",
+      "ignore_err",
+      "-fflags",
+      "+discardcorrupt",
       "-i",
       "pipe:0",
       "-ac",
@@ -204,6 +330,10 @@ async function probeMetadata(input: Buffer): Promise<ProbeMetadata> {
 }
 
 async function handleAnalyze(req: IncomingMessage, res: ServerResponse, url: URL) {
+  const startedAt = Date.now();
+  const contentType = req.headers["content-type"] ?? "";
+  const contentLength = req.headers["content-length"] ?? "";
+
   try {
     const resolutionParam = url.searchParams.get("resolution");
     const resolution = resolutionParam ? Number(resolutionParam) : undefined;
@@ -213,14 +343,71 @@ async function handleAnalyze(req: IncomingMessage, res: ServerResponse, url: URL
     const effectiveResolution = resolution ?? preset.resolution;
     const fftSize = preset.fftSize;
 
-    const body = await readBody(req);
-    if (!body || body.byteLength === 0) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Empty request body" }));
-      return;
+    console.log(
+      `[analyzer] analyze start contentType=${contentType} contentLength=${contentLength} preset=${presetKey} resolution=${effectiveResolution} fftSize=${fftSize}`,
+    );
+
+    const isJson = contentType.includes("application/json");
+    let inputBuffer: Buffer;
+    let sourceLabel = "body";
+
+    if (isJson) {
+      const body = await readBody(req);
+      console.log(`[analyzer] analyze body bytes=${body.byteLength}`);
+      if (!body || body.byteLength === 0) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Empty request body" }));
+        return;
+      }
+
+      let payload: AnalyzePathRequest | null = null;
+      try {
+        payload = JSON.parse(body.toString("utf8")) as AnalyzePathRequest;
+      } catch (error) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid JSON payload" }));
+        return;
+      }
+
+      const keys = normalizeKeyInput(payload);
+      if (!keys.length) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "trackId, path, or keys is required" }));
+        return;
+      }
+
+      const mounted = await readFromMountedR2(keys);
+      if (!mounted) {
+        console.warn(
+          `[analyzer] analyze mount miss keys=${keys.length} mount=${NORMALIZED_MOUNT_PATH}`,
+        );
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Track not found" }));
+        return;
+      }
+
+      inputBuffer = mounted.buffer;
+      sourceLabel = `r2:${mounted.key}`;
+      console.log(
+        `[analyzer] analyze mounted key=${mounted.key} bytes=${inputBuffer.byteLength}`,
+      );
+    } else {
+      const body = await readBody(req);
+      console.log(`[analyzer] analyze body bytes=${body.byteLength}`);
+      if (!body || body.byteLength === 0) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Empty request body" }));
+        return;
+      }
+
+      inputBuffer = body;
     }
 
-    const pcm = await decodeToPCM(body);
+    const pcm = await decodeToPCM(inputBuffer);
+    console.log(
+      `[analyzer] analyze decoded source=${sourceLabel} samples=${pcm.samples.length} sampleRate=${pcm.sampleRate} duration=${(pcm.samples.length / pcm.sampleRate).toFixed(2)}s`,
+    );
+
     const waveform: WaveformData = await analyzeWaveformFromBuffer(
       toAudioBuffer(pcm) as any,
       { resolution: effectiveResolution, fftSize },
@@ -229,29 +416,96 @@ async function handleAnalyze(req: IncomingMessage, res: ServerResponse, url: URL
     const finalWaveform = applyPresetToWaveform(waveform, preset);
     const { bpm, beatOffsetSeconds } = estimateBpmAndOffsetFromBuffer(toAudioBuffer(pcm) as any);
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ waveform: finalWaveform, preset: presetKey, bpm, beatOffsetSeconds }));
+    const bytes = writeJsonChunked(res, {
+      waveform: finalWaveform,
+      preset: presetKey,
+      bpm,
+      beatOffsetSeconds,
+    });
+    console.log(
+      `[analyzer] analyze success bars=${finalWaveform.bars?.length ?? 0} bpm=${bpm ?? ""} bytes=${bytes} elapsedMs=${Date.now() - startedAt}`,
+    );
   } catch (error) {
-    console.error("Analyze failed", error);
+    console.error("[analyzer] analyze failed", error);
     res.writeHead(500, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: (error as Error).message }));
   }
 }
 
 async function handleMetadata(req: IncomingMessage, res: ServerResponse) {
+  const startedAt = Date.now();
+  const contentType = req.headers["content-type"] ?? "";
+  const contentLength = req.headers["content-length"] ?? "";
+
   try {
-    const body = await readBody(req);
-    if (!body || body.byteLength === 0) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Empty request body" }));
-      return;
+    console.log(
+      `[analyzer] metadata start contentType=${contentType} contentLength=${contentLength}`,
+    );
+
+    const isJson = contentType.includes("application/json");
+    let inputBuffer: Buffer;
+    let sourceLabel = "body";
+
+    if (isJson) {
+      const body = await readBody(req);
+      console.log(`[analyzer] metadata body bytes=${body.byteLength}`);
+      if (!body || body.byteLength === 0) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Empty request body" }));
+        return;
+      }
+
+      let payload: AnalyzePathRequest | null = null;
+      try {
+        payload = JSON.parse(body.toString("utf8")) as AnalyzePathRequest;
+      } catch (error) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid JSON payload" }));
+        return;
+      }
+
+      const keys = normalizeKeyInput(payload);
+      if (!keys.length) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "trackId, path, or keys is required" }));
+        return;
+      }
+
+      const mounted = await readFromMountedR2(keys);
+      if (!mounted) {
+        console.warn(
+          `[analyzer] metadata mount miss keys=${keys.length} mount=${NORMALIZED_MOUNT_PATH}`,
+        );
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Track not found" }));
+        return;
+      }
+
+      inputBuffer = mounted.buffer;
+      sourceLabel = `r2:${mounted.key}`;
+      console.log(
+        `[analyzer] metadata mounted key=${mounted.key} bytes=${inputBuffer.byteLength}`,
+      );
+    } else {
+      const body = await readBody(req);
+      console.log(`[analyzer] metadata body bytes=${body.byteLength}`);
+      if (!body || body.byteLength === 0) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Empty request body" }));
+        return;
+      }
+
+      inputBuffer = body;
     }
 
-    const metadata = await probeMetadata(body);
+    const metadata = await probeMetadata(inputBuffer);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(metadata));
+    console.log(
+      `[analyzer] metadata success source=${sourceLabel} elapsedMs=${Date.now() - startedAt}`,
+    );
   } catch (error) {
-    console.error("Metadata probe failed", error);
+    console.error("[analyzer] metadata failed", error);
     res.writeHead(500, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: (error as Error).message }));
   }
@@ -259,6 +513,14 @@ async function handleMetadata(req: IncomingMessage, res: ServerResponse) {
 
 createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://container");
+
+  req.on("error", (error) => {
+    console.error("[analyzer] request error", error);
+  });
+
+  res.on("error", (error) => {
+    console.error("[analyzer] response error", error);
+  });
 
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "Content-Type": "text/plain" });
@@ -279,5 +541,16 @@ createServer((req, res) => {
   res.writeHead(404, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ error: "Not found" }));
 }).listen(PORT, () => {
-  console.log(`[analyzer] listening on :${PORT}`);
+  console.log(
+    `[analyzer] listening on :${PORT} mount=${NORMALIZED_MOUNT_PATH} r2Account=${process.env.R2_ACCOUNT_ID ?? ""} r2Bucket=${process.env.R2_BUCKET_NAME ?? ""}`,
+  );
+  void logMountStatus();
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[analyzer] unhandledRejection", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[analyzer] uncaughtException", error);
 });

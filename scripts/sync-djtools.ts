@@ -12,49 +12,36 @@ type UploadItem = {
 
 type Options = {
   uploadUrl: string;
-  uploadBulkUrl: string;
   playlistsDir: string;
   tracksDir: string;
   includeLibrary: boolean;
   dryRun: boolean;
   concurrency: number;
-  bulk: boolean;
-  chunkSize: number;
   playlistPath?: string;
+  trackPath?: string;
 };
 
 const DEFAULT_UPLOAD_URL =
   process.env.TRACKS_UPLOAD_URL ?? "http://localhost:8787/api/tracks/upload";
-const DEFAULT_UPLOAD_BULK_URL =
-  process.env.TRACKS_UPLOAD_BULK_URL ??
-  "http://localhost:8787/api/tracks/upload/bulk";
-
 const DEFAULT_PLAYLISTS_DIR = path.join(homedir(), ".djtools", "playlists");
 const DEFAULT_TRACKS_DIR = path.join(homedir(), ".djtools", "tracks");
 
 function parseArgs(argv: string[]): Options {
   const opts: Options = {
     uploadUrl: DEFAULT_UPLOAD_URL,
-    uploadBulkUrl: DEFAULT_UPLOAD_BULK_URL,
     playlistsDir: DEFAULT_PLAYLISTS_DIR,
     tracksDir: DEFAULT_TRACKS_DIR,
     includeLibrary: false,
     dryRun: false,
     concurrency: 1,
-    bulk: true,
-    chunkSize: 2,
     playlistPath: undefined,
+    trackPath: undefined,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--endpoint") {
       opts.uploadUrl = argv[i + 1] ?? opts.uploadUrl;
-      i += 1;
-      continue;
-    }
-    if (arg === "--bulk-endpoint") {
-      opts.uploadBulkUrl = argv[i + 1] ?? opts.uploadBulkUrl;
       i += 1;
       continue;
     }
@@ -70,6 +57,11 @@ function parseArgs(argv: string[]): Options {
     }
     if (arg === "--playlist-path") {
       opts.playlistPath = argv[i + 1] ?? opts.playlistPath;
+      i += 1;
+      continue;
+    }
+    if (arg === "--track-path") {
+      opts.trackPath = argv[i + 1] ?? opts.trackPath;
       i += 1;
       continue;
     }
@@ -93,19 +85,9 @@ function parseArgs(argv: string[]): Options {
       opts.concurrency = 0;
       continue;
     }
-    if (arg === "--bulk") {
-      opts.bulk = true;
-      continue;
-    }
-    if (arg === "--chunk-size") {
-      const next = Number(argv[i + 1]);
-      if (Number.isFinite(next) && next > 0) {
-        opts.chunkSize = Math.floor(next);
-        i += 1;
-        continue;
-      }
-    }
   }
+
+  opts.concurrency = 1;
 
   return opts;
 }
@@ -139,6 +121,21 @@ async function collectAudioFiles(root: string): Promise<string[]> {
 async function buildUploadList(opts: Options): Promise<UploadItem[]> {
   const uploads: UploadItem[] = [];
   const seenTrackIds = new Set<string>();
+
+  if (opts.trackPath) {
+    const trackId = path.basename(opts.trackPath);
+    if (!trackId) {
+      return uploads;
+    }
+
+    const playlistTitle = opts.playlistPath
+      ? path.basename(opts.playlistPath).trim()
+      : undefined;
+
+    uploads.push({ filePath: opts.trackPath, trackId, playlistTitle });
+    seenTrackIds.add(trackId);
+    return uploads;
+  }
 
   if (opts.playlistPath) {
     const playlistTitle = path.basename(opts.playlistPath).trim();
@@ -243,111 +240,15 @@ async function uploadTrack(item: UploadItem, opts: Options): Promise<string> {
   return `${item.trackId}: ${payload.status ?? "ok"}`;
 }
 
-function chunkItems(items: UploadItem[], chunkSize: number): UploadItem[][] {
-  const chunks: UploadItem[][] = [];
-  for (let i = 0; i < items.length; i += chunkSize) {
-    chunks.push(items.slice(i, i + chunkSize));
-  }
-  return chunks;
-}
-
-async function uploadChunk(
-  items: UploadItem[],
-  playlistTitle: string | undefined,
-  opts: Options,
-): Promise<string[]> {
-  const trackIds = items.map((item) => item.trackId);
-  console.log(`bulk:start[${trackIds.join(" | ")}]`);
-
-  if (opts.dryRun) {
-    return items.map(
-      (item) => `[dry-run] ${item.trackId} -> ${playlistTitle ?? "(no playlist)"}`,
-    );
-  }
-
-  const form = new FormData();
-
-  for (const item of items) {
-    form.append("files", Bun.file(item.filePath));
-  }
-
-  form.set("trackIds", JSON.stringify(trackIds));
-  if (playlistTitle) {
-    form.set("playlist", playlistTitle);
-  }
-
-  const response = await fetch(opts.uploadBulkUrl, {
-    method: "POST",
-    body: form,
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    console.log(`bulk:done[${trackIds.join(" | ")}]`);
-    return trackIds.map((trackId) => `${trackId}: error ${response.status} ${text}`);
-  }
-
-  const payload = (await response.json()) as {
-    results?: Array<{ trackId?: string; status?: string; error?: string }>;
-  };
-
-  const results = payload.results ?? [];
-  if (!results.length) {
-    console.log(`bulk:done[${trackIds.join(" | ")}]`);
-    return trackIds.map((trackId) => `${trackId}: ok`);
-  }
-
-  const mapped = results.map((result, index) => {
-    const trackId = result.trackId ?? trackIds[index] ?? "unknown";
-    if (result.error) {
-      return `${trackId}: error ${result.error}`;
-    }
-    return `${trackId}: ${result.status ?? "ok"}`;
-  });
-
-  console.log(`bulk:done[${trackIds.join(" | ")}]`);
-  return mapped;
-}
 
 async function uploadAll(uploads: UploadItem[], opts: Options) {
-  if (!opts.bulk) {
-    const results = await runWithConcurrency(
-      uploads,
-      opts.concurrency,
-      async (item) => uploadTrack(item, opts),
-    );
-    for (const line of results) {
-      console.log(line);
-    }
-    return;
-  }
-
-  const groups = new Map<string, UploadItem[]>();
-  for (const item of uploads) {
-    const key = item.playlistTitle ?? "__no_playlist__";
-    const existing = groups.get(key) ?? [];
-    existing.push(item);
-    groups.set(key, existing);
-  }
-
-  const chunkJobs: Array<{ playlistTitle?: string; items: UploadItem[] }> = [];
-  for (const [key, items] of groups.entries()) {
-    const playlistTitle = key === "__no_playlist__" ? undefined : key;
-    for (const chunk of chunkItems(items, opts.chunkSize)) {
-      chunkJobs.push({ playlistTitle, items: chunk });
-    }
-  }
-
   const results = await runWithConcurrency(
-    chunkJobs,
+    uploads,
     opts.concurrency,
-    async (job) => uploadChunk(job.items, job.playlistTitle, opts),
+    async (item) => uploadTrack(item, opts),
   );
-
-  for (const chunkResults of results) {
-    for (const line of chunkResults) {
-      console.log(line);
-    }
+  for (const line of results) {
+    console.log(line);
   }
 }
 

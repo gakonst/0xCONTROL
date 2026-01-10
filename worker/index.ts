@@ -145,6 +145,13 @@ type UploadResult = {
 export class AnalyzerContainer extends Container {
   defaultPort = 3000;
   sleepAfter = "10m";
+  envVars = {
+    AWS_ACCESS_KEY_ID: this.env.AWS_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY: this.env.AWS_SECRET_ACCESS_KEY,
+    R2_BUCKET_NAME: this.env.R2_BUCKET_NAME,
+    R2_ACCOUNT_ID: this.env.R2_ACCOUNT_ID,
+    R2_MOUNT_PATH: this.env.R2_MOUNT_PATH ?? "/mnt/r2",
+  };
 }
 
 export interface Env {
@@ -153,6 +160,11 @@ export interface Env {
   TRACKS_BUCKET: R2Bucket;
   TRACKS_DB: D1Database;
   ANALYZER_CONTAINER: ContainerNamespace;
+  AWS_ACCESS_KEY_ID: string;
+  AWS_SECRET_ACCESS_KEY: string;
+  R2_BUCKET_NAME: string;
+  R2_ACCOUNT_ID: string;
+  R2_MOUNT_PATH?: string;
 }
 
 const INDEX_PATH = "index.html";
@@ -160,6 +172,45 @@ const INDEX_PATH = "index.html";
 type WorkerContext = { Bindings: Env };
 
 const app = new Hono<WorkerContext>();
+
+const ANALYZER_CONCURRENCY = 2;
+
+const analyzerSemaphore = createSemaphore(ANALYZER_CONCURRENCY);
+
+function createSemaphore(limit: number) {
+  let available = limit;
+  const queue: Array<(release: () => void) => void> = [];
+
+  const acquire = () =>
+    new Promise<() => void>((resolve) => {
+      const grant = () => {
+        available -= 1;
+        resolve(() => {
+          available += 1;
+          const next = queue.shift();
+          if (next) next(grant);
+        });
+      };
+
+      if (available > 0) {
+        grant();
+        return;
+      }
+
+      queue.push(grant);
+    });
+
+  return { acquire };
+}
+
+async function withAnalyzerLock<T>(worker: () => Promise<T>): Promise<T> {
+  const release = await analyzerSemaphore.acquire();
+  try {
+    return await worker();
+  } finally {
+    release();
+  }
+}
 
 const requireAuth: MiddlewareHandler<WorkerContext> = async (c, next) => {
   const auth = await authenticateRequest(c);
@@ -229,70 +280,6 @@ app.post("/api/tracks/upload", async (c) => {
   return c.json(result, result.status === "created" ? 201 : 200);
 });
 
-app.post("/api/tracks/upload/bulk", async (c) => {
-  let form: FormData;
-  try {
-    form = await c.req.formData();
-  } catch {
-    return c.text("Invalid form payload", 400);
-  }
-
-  const playlistTitle = normalizeFormString(form.get("playlist"));
-  const rawTrackIds = normalizeFormString(form.get("trackIds"));
-
-  let trackIds: string[] = [];
-  if (rawTrackIds) {
-    try {
-      const parsed = JSON.parse(rawTrackIds);
-      if (Array.isArray(parsed)) {
-        trackIds = parsed.map((entry) => String(entry));
-      }
-    } catch {
-      return c.text("trackIds must be a JSON array", 400);
-    }
-  }
-
-  const files = [
-    ...form.getAll("files"),
-    ...form.getAll("file"),
-  ].filter((entry) => entry instanceof File) as File[];
-
-  if (files.length === 0) {
-    return c.text("files are required", 400);
-  }
-
-  if (trackIds.length && trackIds.length !== files.length) {
-    return c.text("trackIds length must match files length", 400);
-  }
-
-  const results = await runWithConcurrency(files, 3, (file, index) => {
-    const rawTrackId = trackIds[index];
-    const fileName = typeof file.name === "string" ? file.name.trim() : "";
-    const trackId = rawTrackId ?? fileName;
-
-    if (!trackId) {
-      return Promise.resolve({
-        trackId: rawTrackId ?? "",
-        status: "exists",
-        track: null,
-        playlist: null,
-        analyzed: false,
-        error: "trackId is required",
-      });
-    }
-
-    return handleTrackUpload(c.env, file, trackId, playlistTitle);
-  });
-
-  const hasError = results.some((result) => result.error);
-
-  return c.json(
-    {
-      results,
-    },
-    hasError ? 207 : 200,
-  );
-});
 
 app.post("/api/analyze", requireAuth, async (c) => {
   let payload: AnalyzeRequestPayload | null = null;
@@ -316,39 +303,44 @@ app.post("/api/analyze", requireAuth, async (c) => {
     return c.json(cached, 200, { "Cache-Control": "no-store" });
   }
 
-  let object: R2ObjectBody | null = null;
-  for (const candidateKey of candidateKeys) {
-    object = await c.env.TRACKS_BUCKET.get(candidateKey);
-    if (object) break;
-  }
-
-  if (!object) {
-    return c.text("Track not found", 404);
-  }
-
   try {
-    const analyzer = getContainer(c.env.ANALYZER_CONTAINER, "waveform");
-    await analyzer.startAndWaitForPorts();
+    const analyzeResponse = await withAnalyzerLock(async () => {
+      const analyzer = getContainer(c.env.ANALYZER_CONTAINER, "waveform");
+      await analyzer.startAndWaitForPorts();
 
-    const analyzeUrl = new URL("http://container/analyze");
-    if (typeof payload?.resolution === "number" && Number.isInteger(payload.resolution)) {
-      analyzeUrl.searchParams.set("resolution", String(payload.resolution));
-    }
-    const presetKey = payload?.preset;
-    if (presetKey) {
-      analyzeUrl.searchParams.set("preset", presetKey);
-    }
+      const analyzeUrl = new URL("http://container/analyze");
+      if (typeof payload?.resolution === "number" && Number.isInteger(payload.resolution)) {
+        analyzeUrl.searchParams.set("resolution", String(payload.resolution));
+      }
+      const presetKey = payload?.preset;
+      if (presetKey) {
+        analyzeUrl.searchParams.set("preset", presetKey);
+      }
 
-    const analyzeResponse = await analyzer.fetch(
-      new Request(analyzeUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type":
-            object.httpMetadata?.contentType ?? inferContentTypeFromKey(object.key),
-        },
-        body: await object.arrayBuffer(),
-      }),
-    );
+      const healthResponse = await analyzer.fetch(
+        new Request("http://container/health", { method: "GET" }),
+      );
+      const healthBuffer = await healthResponse.arrayBuffer();
+      const healthText = new TextDecoder().decode(healthBuffer);
+
+      console.log("Analyzer health", {
+        status: healthResponse.status,
+        size: healthBuffer.byteLength,
+        body: healthText.trim(),
+      });
+
+      return analyzer.fetch(
+        new Request(analyzeUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keys: candidateKeys }),
+        }),
+      );
+    });
+
+    if (analyzeResponse.status === 404) {
+      return c.text("Track not found", 404);
+    }
 
     if (!analyzeResponse.ok) {
       const text = await analyzeResponse.text();
@@ -356,21 +348,18 @@ app.post("/api/analyze", requireAuth, async (c) => {
       return c.text("Analyzer failed", 502);
     }
 
-    const body = await analyzeResponse.json<Record<string, unknown>>();
-    const waveform = body.waveform as WaveformData | undefined;
-    const bpm = (body.bpm as number | null | undefined) ?? null;
-    const beatOffsetSeconds =
-      (body.beatOffsetSeconds as number | null | undefined) ?? null;
-
-    if (waveform && Array.isArray(waveform.bars)) {
-      await saveWaveformToDb(c.env.TRACKS_DB, trackId, {
-        waveform,
-        bpm,
-        beatOffsetSeconds,
-      });
+    if (!analyzeResponse.body) {
+      console.error("Analyzer returned empty body");
+      return c.text("Analyzer failed", 502);
     }
 
-    return c.json(body, 200, { "Cache-Control": "no-store" });
+    return new Response(analyzeResponse.body, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      },
+    });
   } catch (error) {
     console.error("Failed to analyze track", error);
     return c.text("Analysis failed", 500);
@@ -1119,43 +1108,65 @@ async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
   for (const trackId of missing) {
     const record = tracks.find((t) => t.id === trackId);
     const keyCandidates = buildTrackKeyCandidates(record?.path ?? trackId);
-    let object: R2ObjectBody | null = null;
-    for (const candidateKey of keyCandidates) {
-      object = await env.TRACKS_BUCKET.get(candidateKey);
-      if (object) break;
-    }
-    if (!object) {
-      console.warn("Missing R2 object for unanalyzed track", trackId);
-      continue;
-    }
 
     try {
-      const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
-      await analyzer.startAndWaitForPorts();
+      const body = await withAnalyzerLock(async () => {
+        const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
+        await analyzer.startAndWaitForPorts();
 
-      const analyzeUrl = new URL("http://container/analyze");
-      const analyzeResponse = await analyzer.fetch(
-        new Request(analyzeUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              object.httpMetadata?.contentType ??
-              inferContentTypeFromKey(object.key),
-          },
-          body: await object.arrayBuffer(),
-        }),
-      );
-
-      if (!analyzeResponse.ok) {
-        console.warn(
-          "Analyzer failed while backfilling",
-          trackId,
-          analyzeResponse.status,
+        const analyzeUrl = new URL("http://container/analyze");
+        const analyzeResponse = await analyzer.fetch(
+          new Request(analyzeUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ keys: keyCandidates }),
+          }),
         );
+
+        if (analyzeResponse.status === 404) {
+          console.warn("Missing R2 object for unanalyzed track", trackId);
+          return null;
+        }
+
+        if (!analyzeResponse.ok) {
+          console.warn(
+            "Analyzer failed while backfilling",
+            trackId,
+            analyzeResponse.status,
+          );
+          return null;
+        }
+
+        const responseBuffer = await analyzeResponse.arrayBuffer();
+        const responseSize = responseBuffer.byteLength;
+        const responseText = new TextDecoder().decode(responseBuffer);
+
+        console.log("Analyzer response", {
+          status: analyzeResponse.status,
+          size: responseSize,
+        });
+
+        if (!responseText.trim()) {
+          console.warn("Analyzer returned empty body");
+          return null;
+        }
+
+        try {
+          return JSON.parse(responseText) as Record<string, unknown>;
+        } catch (error) {
+          console.warn("Analyzer response parse failed", {
+            error: (error as Error).message,
+            size: responseSize,
+            snippet: responseText.slice(0, 200),
+          });
+          return null;
+        }
+      });
+
+      if (!body) {
         continue;
       }
 
-      const body = await analyzeResponse.json<Record<string, unknown>>();
       const waveform = body.waveform as WaveformData | undefined;
       const bpm = (body.bpm as number | null | undefined) ?? null;
       const beatOffsetSeconds =
@@ -1174,36 +1185,84 @@ async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
   }
 }
 
-async function analyzeTrackBuffer(
+async function analyzeTrackByKeys(
   env: Env,
-  buffer: ArrayBuffer,
-  contentType: string,
+  keys: string[],
 ): Promise<{ waveform?: WaveformData; bpm?: number | null; beatOffsetSeconds?: number | null } | null> {
+  if (!keys.length) {
+    return null;
+  }
+
   try {
-    const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
-    await analyzer.startAndWaitForPorts();
+    return await withAnalyzerLock(async () => {
+      const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
+      await analyzer.startAndWaitForPorts();
 
-    const analyzeUrl = new URL("http://container/analyze");
-    const analyzeResponse = await analyzer.fetch(
-      new Request(analyzeUrl, {
-        method: "POST",
-        headers: { "Content-Type": contentType },
-        body: buffer,
-      }),
-    );
+      const analyzeUrl = new URL("http://container/analyze");
 
-    if (!analyzeResponse.ok) {
-      console.warn("Analyzer failed for upload", analyzeResponse.status);
-      return null;
-    }
+      const healthResponse = await analyzer.fetch(
+        new Request("http://container/health", { method: "GET" }),
+      );
+      const healthBuffer = await healthResponse.arrayBuffer();
+      const healthText = new TextDecoder().decode(healthBuffer);
 
-    const body = await analyzeResponse.json<Record<string, unknown>>();
-    const waveform = body.waveform as WaveformData | undefined;
-    const bpm = (body.bpm as number | null | undefined) ?? null;
-    const beatOffsetSeconds =
-      (body.beatOffsetSeconds as number | null | undefined) ?? null;
+      console.log("Analyzer health", {
+        status: healthResponse.status,
+        size: healthBuffer.byteLength,
+        body: healthText.trim(),
+      });
 
-    return { waveform, bpm, beatOffsetSeconds };
+      const analyzeResponse = await analyzer.fetch(
+        new Request(analyzeUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keys }),
+        }),
+      );
+
+      if (analyzeResponse.status === 404) {
+        console.warn("Analyzer missing track for upload", keys[0]);
+        return null;
+      }
+
+      if (!analyzeResponse.ok) {
+        console.warn("Analyzer failed for upload", analyzeResponse.status);
+        return null;
+      }
+
+      const responseBuffer = await analyzeResponse.arrayBuffer();
+      const responseSize = responseBuffer.byteLength;
+      const responseText = new TextDecoder().decode(responseBuffer);
+
+      console.log("Analyzer response", {
+        status: analyzeResponse.status,
+        size: responseSize,
+      });
+
+      if (!responseText.trim()) {
+        console.warn("Analyzer returned empty body");
+        return null;
+      }
+
+      let body: Record<string, unknown>;
+      try {
+        body = JSON.parse(responseText) as Record<string, unknown>;
+      } catch (error) {
+        console.warn("Analyzer response parse failed", {
+          error: (error as Error).message,
+          size: responseSize,
+          snippet: responseText.slice(0, 200),
+        });
+        return null;
+      }
+
+      const waveform = body.waveform as WaveformData | undefined;
+      const bpm = (body.bpm as number | null | undefined) ?? null;
+      const beatOffsetSeconds =
+        (body.beatOffsetSeconds as number | null | undefined) ?? null;
+
+      return { waveform, bpm, beatOffsetSeconds };
+    });
   } catch (error) {
     console.warn("Analyzer upload failed", error);
     return null;
@@ -1212,28 +1271,38 @@ async function analyzeTrackBuffer(
 
 async function fetchMetadataFromAnalyzer(
   env: Env,
-  buffer: ArrayBuffer,
-  contentType: string,
+  keys: string[],
 ): Promise<AnalyzerMetadata> {
+  if (!keys.length) {
+    return {};
+  }
+
   try {
-    const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
-    await analyzer.startAndWaitForPorts();
+    return await withAnalyzerLock(async () => {
+      const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
+      await analyzer.startAndWaitForPorts();
 
-    const metadataUrl = new URL("http://container/metadata");
-    const response = await analyzer.fetch(
-      new Request(metadataUrl, {
-        method: "POST",
-        headers: { "Content-Type": contentType },
-        body: buffer,
-      }),
-    );
+      const metadataUrl = new URL("http://container/metadata");
+      const response = await analyzer.fetch(
+        new Request(metadataUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keys }),
+        }),
+      );
 
-    if (!response.ok) {
-      console.warn("Metadata probe failed", response.status);
-      return {};
-    }
+      if (response.status === 404) {
+        console.warn("Metadata probe missing track", keys[0]);
+        return {};
+      }
 
-    return (await response.json()) as AnalyzerMetadata;
+      if (!response.ok) {
+        console.warn("Metadata probe failed", response.status);
+        return {};
+      }
+
+      return (await response.json()) as AnalyzerMetadata;
+    });
   } catch (error) {
     console.warn("Metadata probe error", error);
     return {};
@@ -1382,18 +1451,10 @@ async function handleTrackUpload(
       objectKey = trackId;
     }
 
-    const bufferForAnalysis = object ? await object.arrayBuffer() : uploadBuffer;
-    const contentTypeForAnalysis =
-      object?.httpMetadata?.contentType ??
-      uploadContentType ??
-      inferContentTypeFromKey(objectKey ?? trackId);
+    const keyCandidates = buildTrackKeyCandidates(objectKey ?? trackId);
 
     if (!existingTrack) {
-      const metadata = await fetchMetadataFromAnalyzer(
-        env,
-        bufferForAnalysis,
-        contentTypeForAnalysis,
-      );
+      const metadata = await fetchMetadataFromAnalyzer(env, keyCandidates);
       const fallback = parseTrackNameFromFilename(trackId);
       const name =
         normalizeOptionalString(metadata.title) ??
@@ -1461,14 +1522,23 @@ async function handleTrackUpload(
     } | null = null;
 
     if (!existingWaveform) {
-      analysis = await analyzeTrackBuffer(env, bufferForAnalysis, contentTypeForAnalysis);
-      if (analysis?.waveform && Array.isArray(analysis.waveform.bars)) {
-        await saveWaveformToDb(env.TRACKS_DB, trackId, {
-          waveform: analysis.waveform,
-          bpm: analysis.bpm ?? null,
-          beatOffsetSeconds: analysis.beatOffsetSeconds ?? null,
-        });
+      analysis = await analyzeTrackByKeys(env, keyCandidates);
+      if (!analysis?.waveform || !Array.isArray(analysis.waveform.bars)) {
+        return {
+          trackId,
+          status: existingTrack ? "exists" : "created",
+          track: null,
+          playlist,
+          analyzed: false,
+          error: "Analysis failed",
+        };
       }
+
+      await saveWaveformToDb(env.TRACKS_DB, trackId, {
+        waveform: analysis.waveform,
+        bpm: analysis.bpm ?? null,
+        beatOffsetSeconds: analysis.beatOffsetSeconds ?? null,
+      });
     }
 
     const track = await loadTrackById(env.TRACKS_DB, trackId);
@@ -1548,8 +1618,14 @@ function buildTrackKeyCandidates(rawTrackId?: string): string[] {
   }
 
   const decoded = safeDecodeURIComponent(rawTrackId);
-  const encoded = encodeURIComponent(decoded ?? rawTrackId);
-  const encodedUri = encodeURI(decoded ?? rawTrackId);
+  const base = decoded ?? rawTrackId;
+  const encoded = encodeURIComponent(base);
+  const encodedUri = encodeURI(base);
+  const encodedStrict = encodeURIComponent(base).replace(/[!'()*]/g, (char) =>
+    `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  const plusEncoded = encoded.replace(/%20/g, "+");
+  const basePlus = base.replace(/ /g, "+");
   const keys = new Set<string>();
 
   if (decoded) {
@@ -1560,8 +1636,12 @@ function buildTrackKeyCandidates(rawTrackId?: string): string[] {
     keys.add(rawTrackId);
   }
 
+  keys.add(base);
+  keys.add(basePlus);
   keys.add(encoded);
+  keys.add(plusEncoded);
   keys.add(encodedUri);
+  keys.add(encodedStrict);
 
   // Common layout: objects live under a "tracks/" prefix in R2. Try both forms.
   const candidates = Array.from(keys);

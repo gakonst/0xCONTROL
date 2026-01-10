@@ -2,12 +2,17 @@ name = "zero-control-dapp"
 main = "worker/index.ts"
 compatibility_date = "2025-11-22"
 
+[observability]
+enabled = true
+
 [env.preview]
 # Separate preview script name so Durable Objects/D1/R2 use isolated namespaces
 name = "zero-control-dapp-preview"
 
 [env.preview.vars]
 SONG_PASSWORD = "true"
+R2_BUCKET_NAME = "zero-control-tracks-preview"
+R2_ACCOUNT_ID = "replace-me"
 
 [[env.preview.r2_buckets]]
 binding = "TRACKS_BUCKET"
@@ -45,6 +50,8 @@ database_name = "zero-control-tracks"
 
 [vars]
 SONG_PASSWORD = "true"
+R2_BUCKET_NAME = "zero-control-tracks"
+R2_ACCOUNT_ID = "7fb82fc3b80331b2cd45f097acbd9ffc"
 
 [[containers]]
 class_name = "AnalyzerContainer"
