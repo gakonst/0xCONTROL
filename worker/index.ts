@@ -280,6 +280,69 @@ app.post("/api/tracks/upload", async (c) => {
   return c.json(result, result.status === "created" ? 201 : 200);
 });
 
+app.post("/api/tracks/upload/bulk", async (c) => {
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    return c.text("Invalid form payload", 400);
+  }
+
+  const playlistTitle = normalizeFormString(form.get("playlist"));
+  const rawTrackIds = normalizeFormString(form.get("trackIds"));
+
+  let trackIds: string[] = [];
+  if (rawTrackIds) {
+    try {
+      const parsed = JSON.parse(rawTrackIds);
+      if (Array.isArray(parsed)) {
+        trackIds = parsed.map((entry) => String(entry));
+      }
+    } catch {
+      return c.text("trackIds must be a JSON array", 400);
+    }
+  }
+
+  const files = [...form.getAll("files"), ...form.getAll("file")].filter(
+    (entry) => entry instanceof File,
+  ) as File[];
+
+  if (files.length === 0) {
+    return c.text("files are required", 400);
+  }
+
+  if (trackIds.length && trackIds.length !== files.length) {
+    return c.text("trackIds length must match files length", 400);
+  }
+
+  const results = await runWithConcurrency(files, 3, (file, index) => {
+    const rawTrackId = trackIds[index];
+    const fileName = typeof file.name === "string" ? file.name.trim() : "";
+    const trackId = rawTrackId ?? fileName;
+
+    if (!trackId) {
+      return Promise.resolve({
+        trackId: rawTrackId ?? "",
+        status: "exists",
+        track: null,
+        playlist: null,
+        analyzed: false,
+        error: "trackId is required",
+      });
+    }
+
+    return handleTrackUpload(c.env, file, trackId, playlistTitle);
+  });
+
+  const hasError = results.some((result) => result.error);
+
+  return c.json(
+    {
+      results,
+    },
+    hasError ? 207 : 200,
+  );
+});
 
 app.post("/api/analyze", requireAuth, async (c) => {
   let payload: AnalyzeRequestPayload | null = null;
