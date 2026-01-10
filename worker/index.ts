@@ -181,46 +181,8 @@ type WorkerContext = { Bindings: Env };
 
 const app = new Hono<WorkerContext>();
 
-const ANALYZER_CONCURRENCY = 2;
 const AUDIO_EXTENSIONS = new Set([".mp3", ".m4a", ".flac", ".wav"]);
 const STREAM_PREFIX = "streams";
-
-const analyzerSemaphore = createSemaphore(ANALYZER_CONCURRENCY);
-
-function createSemaphore(limit: number) {
-  let available = limit;
-  const queue: Array<(release: () => void) => void> = [];
-
-  const acquire = () =>
-    new Promise<() => void>((resolve) => {
-      const grant = () => {
-        available -= 1;
-        resolve(() => {
-          available += 1;
-          const next = queue.shift();
-          if (next) next(grant);
-        });
-      };
-
-      if (available > 0) {
-        grant();
-        return;
-      }
-
-      queue.push(grant);
-    });
-
-  return { acquire };
-}
-
-async function withAnalyzerLock<T>(worker: () => Promise<T>): Promise<T> {
-  const release = await analyzerSemaphore.acquire();
-  try {
-    return await worker();
-  } finally {
-    release();
-  }
-}
 
 const requireAuth: MiddlewareHandler<WorkerContext> = async (c, next) => {
   const auth = await authenticateRequest(c);
@@ -376,7 +338,7 @@ app.post("/api/analyze", requireAuth, async (c) => {
   }
 
   try {
-    const analyzeResponse = await withAnalyzerLock(async () => {
+    const analyzeResponse = await (async () => {
       const analyzer = getContainer(c.env.ANALYZER_CONTAINER, "waveform");
       await analyzer.startAndWaitForPorts();
 
@@ -408,7 +370,7 @@ app.post("/api/analyze", requireAuth, async (c) => {
           body: JSON.stringify({ keys: candidateKeys }),
         }),
       );
-    });
+    })();
 
     if (analyzeResponse.status === 404) {
       return c.text("Track not found", 404);
@@ -1314,7 +1276,7 @@ async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
     const keyCandidates = buildTrackKeyCandidates(record?.path ?? trackId);
 
     try {
-      const body = await withAnalyzerLock(async () => {
+      const body = await (async () => {
         const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
         await analyzer.startAndWaitForPorts();
 
@@ -1365,7 +1327,7 @@ async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
           });
           return null;
         }
-      });
+      })();
 
       if (!body) {
         continue;
@@ -1443,7 +1405,7 @@ async function analyzeTrackByKeys(
   }
 
   try {
-    return await withAnalyzerLock(async () => {
+    return await (async () => {
       const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
       await analyzer.startAndWaitForPorts();
 
@@ -1511,7 +1473,7 @@ async function analyzeTrackByKeys(
         (body.beatOffsetSeconds as number | null | undefined) ?? null;
 
       return { waveform, bpm, beatOffsetSeconds };
-    });
+    })();
   } catch (error) {
     console.warn("Analyzer upload failed", error);
     return null;
@@ -1527,7 +1489,7 @@ async function fetchMetadataFromAnalyzer(
   }
 
   try {
-    return await withAnalyzerLock(async () => {
+    return await (async () => {
       const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
       await analyzer.startAndWaitForPorts();
 
@@ -1551,7 +1513,7 @@ async function fetchMetadataFromAnalyzer(
       }
 
       return (await response.json()) as AnalyzerMetadata;
-    });
+    })();
   } catch (error) {
     console.warn("Metadata probe error", error);
     return {};
@@ -1858,7 +1820,7 @@ async function transcodeTrackByKeys(
   trackId: string,
   keyCandidates: string[],
 ): Promise<void> {
-  const transcodeResponse = await withAnalyzerLock(async () => {
+  const transcodeResponse = await (async () => {
     const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
     await analyzer.startAndWaitForPorts();
 
@@ -1869,7 +1831,7 @@ async function transcodeTrackByKeys(
         body: JSON.stringify({ keys: keyCandidates, trackId }),
       }),
     );
-  });
+  })();
 
   if (transcodeResponse.status === 404) {
     return;
