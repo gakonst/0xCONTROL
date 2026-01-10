@@ -2,6 +2,9 @@ name = "zero-control-dapp"
 main = "worker/index.ts"
 compatibility_date = "2025-11-22"
 
+[triggers]
+crons = ["*/30 * * * *"]
+
 [observability]
 enabled = true
 
@@ -34,6 +37,11 @@ instance_type = "standard-2"
 name = "ANALYZER_CONTAINER"
 class_name = "AnalyzerContainer"
 
+[[env.preview.queues.consumers]]
+queue = "zero-control-tracks-analyze-preview"
+max_batch_size = 5
+max_batch_timeout = 5
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
@@ -62,6 +70,11 @@ instance_type = "standard-2"
 [[durable_objects.bindings]]
 name = "ANALYZER_CONTAINER"
 class_name = "AnalyzerContainer"
+
+[[queues.consumers]]
+queue = "zero-control-tracks-analyze"
+max_batch_size = 5
+max_batch_timeout = 5
 
 [[migrations]]
 tag = "v2-analyzer-container"

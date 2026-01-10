@@ -125,6 +125,15 @@ type AnalyzeRequestPayload = {
   preset?: PresetKey;
 };
 
+type R2EventNotification = {
+  eventType?: string;
+  key?: string;
+  object?: {
+    key?: string;
+    name?: string;
+  };
+};
+
 type AnalyzerMetadata = {
   title?: string;
   artist?: string;
@@ -138,7 +147,6 @@ type UploadResult = {
   status: "created" | "exists";
   track: TrackRecord | null;
   playlist: PlaylistRecord | null;
-  analyzed: boolean;
   error?: string;
 };
 
@@ -174,6 +182,7 @@ type WorkerContext = { Bindings: Env };
 const app = new Hono<WorkerContext>();
 
 const ANALYZER_CONCURRENCY = 2;
+const AUDIO_EXTENSIONS = new Set([".mp3", ".m4a", ".flac", ".wav"]);
 
 const analyzerSemaphore = createSemaphore(ANALYZER_CONCURRENCY);
 
@@ -326,7 +335,6 @@ app.post("/api/tracks/upload/bulk", async (c) => {
         status: "exists",
         track: null,
         playlist: null,
-        analyzed: false,
         error: "trackId is required",
       });
     }
@@ -821,6 +829,29 @@ export default {
     const assetRequest = new Request(request.url, request);
     return serveAssets(assetRequest, env);
   },
+  async queue(batch, env): Promise<void> {
+    for (const message of batch.messages) {
+      const keys = extractR2EventKeys(message.body);
+      if (!keys.length) {
+        message.ack();
+        continue;
+      }
+
+      try {
+        for (const key of keys) {
+          await analyzeTrackFromQueue(env, key);
+        }
+        message.ack();
+      } catch (error) {
+        console.warn("Queue analysis failed", error);
+        message.retry();
+      }
+    }
+  },
+  async scheduled(controller, env, ctx): Promise<void> {
+    console.log("Scheduled backfill start", { schedule: controller.cron });
+    ctx.waitUntil(runScheduledWaveformBackfill(env));
+  },
 } satisfies ExportedHandler<Env>;
 
 async function buildCatalogResponse(
@@ -840,6 +871,15 @@ async function buildCatalogResponse(
   } catch (error) {
     console.error("Failed to load catalog from D1", error);
     return { tracks: [] };
+  }
+}
+
+async function runScheduledWaveformBackfill(env: Env): Promise<void> {
+  try {
+    const tracks = await loadCatalogFromDb(env.TRACKS_DB);
+    await analyzeMissingTracks(env, tracks);
+  } catch (error) {
+    console.error("Scheduled waveform backfill failed", error);
   }
 }
 
@@ -1481,6 +1521,67 @@ async function runWithConcurrency<T, R>(
   return results;
 }
 
+async function ensureTrackMetadata(
+  env: Env,
+  trackId: string,
+  keyCandidates: string[],
+): Promise<TrackRecord | null> {
+  const existingTrack = await loadTrackById(env.TRACKS_DB, trackId);
+  if (existingTrack) {
+    return existingTrack;
+  }
+
+  const metadata = await fetchMetadataFromAnalyzer(env, keyCandidates);
+  const fallback = parseTrackNameFromFilename(trackId);
+  const name =
+    normalizeOptionalString(metadata.title) ??
+    normalizeOptionalString(fallback.title) ??
+    "Untitled Track";
+  const artist =
+    normalizeOptionalString(metadata.artist) ??
+    normalizeOptionalString(fallback.artist) ??
+    "Unknown Artist";
+  const album = normalizeOptionalString(metadata.album);
+  const genre = normalizeOptionalString(metadata.genre);
+  const durationSeconds = normalizeDurationSeconds(metadata.durationSeconds);
+
+  const insert = await env.TRACKS_DB.prepare(
+    `
+      INSERT INTO track_metadata (
+        track_id,
+        name,
+        artist,
+        album,
+        genre,
+        duration_seconds,
+        bpm,
+        musical_key,
+        annotation_color,
+        annotation_note
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  )
+    .bind(
+      trackId,
+      name,
+      artist,
+      album,
+      genre,
+      durationSeconds ?? 0,
+      0,
+      "--",
+      null,
+      null,
+    )
+    .run();
+
+  if (!insert.success) {
+    return null;
+  }
+
+  return loadTrackById(env.TRACKS_DB, trackId);
+}
+
 async function handleTrackUpload(
   env: Env,
   file: File,
@@ -1517,57 +1618,13 @@ async function handleTrackUpload(
     const keyCandidates = buildTrackKeyCandidates(objectKey ?? trackId);
 
     if (!existingTrack) {
-      const metadata = await fetchMetadataFromAnalyzer(env, keyCandidates);
-      const fallback = parseTrackNameFromFilename(trackId);
-      const name =
-        normalizeOptionalString(metadata.title) ??
-        normalizeOptionalString(fallback.title) ??
-        "Untitled Track";
-      const artist =
-        normalizeOptionalString(metadata.artist) ??
-        normalizeOptionalString(fallback.artist) ??
-        "Unknown Artist";
-      const album = normalizeOptionalString(metadata.album);
-      const genre = normalizeOptionalString(metadata.genre);
-      const durationSeconds = normalizeDurationSeconds(metadata.durationSeconds);
-
-      const insert = await env.TRACKS_DB.prepare(
-        `
-          INSERT INTO track_metadata (
-            track_id,
-            name,
-            artist,
-            album,
-            genre,
-            duration_seconds,
-            bpm,
-            musical_key,
-            annotation_color,
-            annotation_note
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-      )
-        .bind(
-          trackId,
-          name,
-          artist,
-          album,
-          genre,
-          durationSeconds ?? 0,
-          0,
-          "--",
-          null,
-          null,
-        )
-        .run();
-
-      if (!insert.success) {
+      const ensuredTrack = await ensureTrackMetadata(env, trackId, keyCandidates);
+      if (!ensuredTrack) {
         return {
           trackId,
           status: "created",
           track: null,
           playlist: null,
-          analyzed: false,
           error: "Failed to write track metadata",
         };
       }
@@ -1578,32 +1635,6 @@ async function handleTrackUpload(
       playlist = await ensurePlaylistWithTrack(env.TRACKS_DB, playlistTitle, trackId);
     }
 
-    let analysis: {
-      waveform?: WaveformData;
-      bpm?: number | null;
-      beatOffsetSeconds?: number | null;
-    } | null = null;
-
-    if (!existingWaveform) {
-      analysis = await analyzeTrackByKeys(env, keyCandidates);
-      if (!analysis?.waveform || !Array.isArray(analysis.waveform.bars)) {
-        return {
-          trackId,
-          status: existingTrack ? "exists" : "created",
-          track: null,
-          playlist,
-          analyzed: false,
-          error: "Analysis failed",
-        };
-      }
-
-      await saveWaveformToDb(env.TRACKS_DB, trackId, {
-        waveform: analysis.waveform,
-        bpm: analysis.bpm ?? null,
-        beatOffsetSeconds: analysis.beatOffsetSeconds ?? null,
-      });
-    }
-
     const track = await loadTrackById(env.TRACKS_DB, trackId);
 
     return {
@@ -1611,7 +1642,6 @@ async function handleTrackUpload(
       status: existingTrack ? "exists" : "created",
       track,
       playlist,
-      analyzed: Boolean(existingWaveform || analysis?.waveform),
     };
   } catch (error) {
     return {
@@ -1619,10 +1649,95 @@ async function handleTrackUpload(
       status: "exists",
       track: null,
       playlist: null,
-      analyzed: false,
       error: (error as Error).message,
     };
   }
+}
+
+async function analyzeTrackFromQueue(env: Env, objectKey: string): Promise<void> {
+  if (!isAudioObjectKey(objectKey)) {
+    return;
+  }
+
+  const trackId = normalizeTrackIdFromObjectKey(objectKey);
+  if (!trackId) {
+    return;
+  }
+
+  const cached = await loadWaveformFromDb(env.TRACKS_DB, trackId);
+  if (cached) {
+    return;
+  }
+
+  const keyCandidates = buildTrackKeyCandidates(trackId);
+  const track = await ensureTrackMetadata(env, trackId, keyCandidates);
+  if (!track) {
+    throw new Error("Failed to ensure track metadata");
+  }
+
+  const analysis = await analyzeTrackByKeys(env, keyCandidates);
+  if (!analysis?.waveform || !Array.isArray(analysis.waveform.bars)) {
+    throw new Error("Analysis failed");
+  }
+
+  await saveWaveformToDb(env.TRACKS_DB, trackId, {
+    waveform: analysis.waveform,
+    bpm: analysis.bpm ?? null,
+    beatOffsetSeconds: analysis.beatOffsetSeconds ?? null,
+  });
+}
+
+function extractR2EventKeys(body: unknown): string[] {
+  let payload = body;
+  if (typeof payload === "string") {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return [];
+    }
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const events = Array.isArray(payload) ? payload : [payload];
+  const keys = new Set<string>();
+
+  for (const event of events) {
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+
+    const record = event as R2EventNotification;
+    if (record.eventType && record.eventType !== "object-create") {
+      continue;
+    }
+
+    const key = record.object?.key ?? record.object?.name ?? record.key;
+    if (typeof key === "string" && key.trim().length > 0) {
+      keys.add(key.trim());
+    }
+  }
+
+  return Array.from(keys);
+}
+
+function normalizeTrackIdFromObjectKey(objectKey: string): string {
+  const trimmed = objectKey.trim();
+  const withoutPrefix = trimmed.startsWith("tracks/")
+    ? trimmed.slice("tracks/".length)
+    : trimmed;
+  const segments = withoutPrefix.split("/").filter(Boolean);
+  if (segments.length > 0) {
+    return segments[segments.length - 1];
+  }
+  return withoutPrefix;
+}
+
+function isAudioObjectKey(objectKey: string): boolean {
+  const lower = objectKey.toLowerCase();
+  return Array.from(AUDIO_EXTENSIONS).some((ext) => lower.endsWith(ext));
 }
 
 async function getNextPlaylistTrackPosition(
