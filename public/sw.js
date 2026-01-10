@@ -1,5 +1,12 @@
-const CACHE_NAME = '0xcontrol-static-v1'
-const CORE_ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg']
+const CACHE_NAME = '0xcontrol-static-v2'
+const CORE_ASSETS = [
+  '/index.html',
+  '/manifest.webmanifest',
+  '/icon.svg',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/apple-touch-icon.png',
+]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)))
@@ -33,10 +40,12 @@ self.addEventListener('fetch', (event) => {
           return cached
         }
 
-        return fetch(request)
+        return fetch('/index.html', { cache: 'reload' })
           .then((response) => {
-            const responseClone = response.clone()
-            caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', responseClone))
+            if (response && response.status === 200) {
+              const responseClone = response.clone()
+              caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', responseClone))
+            }
             return response
           })
           .catch(() => caches.match('/index.html'))
