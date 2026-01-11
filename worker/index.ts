@@ -2076,11 +2076,7 @@ function buildStreamResponseHeaders(
   headers.set("Content-Type", contentType);
   headers.set("Accept-Ranges", "bytes");
 
-  const isPlaylist = options.fileName.toLowerCase().endsWith(".m3u8");
-  headers.set(
-    "Cache-Control",
-    isPlaylist ? "private, max-age=0, must-revalidate" : "public, max-age=31536000, immutable",
-  );
+  headers.set("Cache-Control", "public, max-age=31536000, immutable");
 
   const contentLength = object.range?.length ?? object.size;
   headers.set("Content-Length", contentLength.toString());
