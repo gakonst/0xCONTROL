@@ -1,5 +1,6 @@
 import {
   memo,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -13,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { LibraryHeader } from "@/components/library-header";
 import { OverviewCanvas } from "@/components/waveform-canvas";
 import { useWaveform } from "@/hooks/use-waveform";
+import { prefetchStreamPreview } from "@/lib/stream-prefetch";
 import { useOnScreen } from "@/hooks/use-on-screen";
 import { formatSecondsToClock } from "@/lib/time";
 
@@ -422,6 +424,11 @@ const TrackListRow = memo(function TrackListRow({
   const liveTimeGetter = isRowActive ? playback?.liveTimeGetter : undefined;
   const baseCurrentTime = isRowActive ? playback?.elapsedSeconds ?? 0 : 0;
   const isRowPlaying = isRowActive ? playback?.isPlaying ?? false : false;
+
+  useEffect(() => {
+    if (!(isVisible || isActive)) return;
+    void prefetchStreamPreview(track.id);
+  }, [isVisible, isActive, track.id]);
 
   const clampOffset = (value: number) => {
     return Math.max(Math.min(value, maxOffset), -maxOffset);

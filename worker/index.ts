@@ -878,24 +878,30 @@ export default {
     return serveAssets(assetRequest, env);
   },
   async queue(batch, env): Promise<void> {
-    for (const message of batch.messages) {
-      const keys = extractR2EventKeys(message.body);
-      if (!keys.length) {
-        message.ack();
-        continue;
-      }
-
-      try {
-        for (const key of keys) {
-          await analyzeTrackFromQueue(env, key);
-          await ensureStreamFromQueue(env, key);
+    await Promise.all(
+      batch.messages.map(async (message) => {
+        const keys = extractR2EventKeys(message.body);
+        if (!keys.length) {
+          message.ack();
+          return;
         }
-        message.ack();
-      } catch (error) {
-        console.warn("Queue processing failed", error);
-        message.retry();
-      }
-    }
+
+        try {
+          await Promise.all(
+            keys.map(async (key) => {
+              await Promise.all([
+                analyzeTrackFromQueue(env, key),
+                ensureStreamFromQueue(env, key),
+              ]);
+            }),
+          );
+          message.ack();
+        } catch (error) {
+          console.warn("Queue processing failed", error);
+          message.retry();
+        }
+      }),
+    );
   },
   async scheduled(controller, env, ctx): Promise<void> {
     console.log("Scheduled backfill start", { schedule: controller.cron });
