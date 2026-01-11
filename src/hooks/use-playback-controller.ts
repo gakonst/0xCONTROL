@@ -207,7 +207,7 @@ export function usePlaybackController(
       setElapsedSeconds(0);
       setDurationSeconds(null);
 
-      hls.on(Hls.Events.ERROR, (_, data) => {
+      hls.on(Hls.Events.ERROR, (_: unknown, data: { fatal: boolean }) => {
         if (!data.fatal) return;
         console.warn("HLS playback failed, falling back", data);
         useDirectUrl(fallbackUrl);
