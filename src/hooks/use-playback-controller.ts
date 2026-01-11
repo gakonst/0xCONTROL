@@ -47,7 +47,7 @@ export function usePlaybackController(
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const trackUrlRef = useRef<string>("");
-  const hlsRef = useRef<Hls | null>(null);
+  const hlsRef = useRef<any | null>(null);
   const prefetchAbortRef = useRef<AbortController | null>(null);
   const goToNextTrackRef = useRef<() => void>(() => {});
   const tracksRef = useRef<Track[]>(tracks);
