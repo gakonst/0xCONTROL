@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 
 import { Container, getContainer, type ContainerNamespace } from "@cloudflare/containers";
-import type { D1Database, ExecutionContext } from "@cloudflare/workers-types";
+import type { D1Database, ExecutionContext, Queue } from "@cloudflare/workers-types";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { MiddlewareHandler } from "hono";
@@ -166,6 +166,7 @@ export interface Env {
   ASSETS: Fetcher;
   SONG_PASSWORD: string;
   TRACKS_BUCKET: R2Bucket;
+  TRACKS_QUEUE: Queue;
   TRACKS_DB: D1Database;
   ANALYZER_CONTAINER: ContainerNamespace;
   AWS_ACCESS_KEY_ID: string;
@@ -402,15 +403,15 @@ app.post("/api/analyze", requireAuth, async (c) => {
 
 app.post("/api/streams/backfill", requireAuth, async (c) => {
   const tracks = await loadCatalogFromDb(c.env.TRACKS_DB);
-  const backfillTask = transcodeMissingStreams(c.env, tracks);
+  const backfillTask = queueMissingStreams(c.env, tracks);
 
   if (c.executionCtx) {
     c.executionCtx.waitUntil(backfillTask);
-    return c.json({ status: "started", total: tracks.length }, 202);
+    return c.json({ status: "queued", total: tracks.length }, 202);
   }
 
-  const missing = await backfillTask;
-  return c.json({ status: "completed", total: tracks.length, missing }, 200);
+  const queued = await backfillTask;
+  return c.json({ status: "queued", total: tracks.length, queued }, 202);
 });
 
 app.get("/api/streams/backfill/status", requireAuth, async (c) => {
@@ -878,30 +879,30 @@ export default {
     return serveAssets(assetRequest, env);
   },
   async queue(batch, env): Promise<void> {
-    await Promise.all(
-      batch.messages.map(async (message) => {
-        const keys = extractR2EventKeys(message.body);
-        if (!keys.length) {
-          message.ack();
-          return;
-        }
+    const messages = batch.messages;
+    if (!messages.length) return;
 
-        try {
-          await Promise.all(
-            keys.map(async (key) => {
-              await Promise.all([
-                analyzeTrackFromQueue(env, key),
-                ensureStreamFromQueue(env, key),
-              ]);
-            }),
-          );
-          message.ack();
-        } catch (error) {
-          console.warn("Queue processing failed", error);
-          message.retry();
+    const concurrency = Math.min(messages.length, 10);
+    await runWithConcurrency(messages, concurrency, async (message) => {
+      const keys = Array.from(new Set(extractR2EventKeys(message.body)));
+      if (!keys.length) {
+        message.ack();
+        return;
+      }
+
+      try {
+        for (const key of keys) {
+          await Promise.all([
+            analyzeTrackFromQueue(env, key),
+            ensureStreamFromQueue(env, key),
+          ]);
         }
-      }),
-    );
+        message.ack();
+      } catch (error) {
+        console.warn("Queue processing failed", error);
+        message.retry();
+      }
+    });
   },
   async scheduled(controller, env, ctx): Promise<void> {
     console.log("Scheduled backfill start", { schedule: controller.cron });
@@ -917,8 +918,8 @@ async function buildCatalogResponse(
   try {
     const tracks = await loadCatalogFromDb(env.TRACKS_DB);
 
-    // Kick off analysis for any tracks missing cached waveforms.
-    const ensureWaveforms = analyzeMissingTracks(env, tracks);
+    // Queue analysis for any tracks missing cached waveforms.
+    const ensureWaveforms = queueMissingTracks(env, tracks);
     if (executionCtx) {
       executionCtx.waitUntil(ensureWaveforms);
     }
@@ -933,7 +934,11 @@ async function buildCatalogResponse(
 async function runScheduledWaveformBackfill(env: Env): Promise<void> {
   try {
     const tracks = await loadCatalogFromDb(env.TRACKS_DB);
-    await analyzeMissingTracks(env, tracks);
+    const queued = await queueMissingTracks(env, tracks);
+    console.log("Scheduled waveform backfill queued", {
+      total: tracks.length,
+      queued,
+    });
   } catch (error) {
     console.error("Scheduled waveform backfill failed", error);
   }
@@ -942,10 +947,10 @@ async function runScheduledWaveformBackfill(env: Env): Promise<void> {
 async function runScheduledStreamBackfill(env: Env): Promise<void> {
   try {
     const tracks = await loadCatalogFromDb(env.TRACKS_DB);
-    const missing = await transcodeMissingStreams(env, tracks);
-    console.log("Scheduled stream backfill complete", {
+    const queued = await queueMissingStreams(env, tracks);
+    console.log("Scheduled stream backfill queued", {
       total: tracks.length,
-      missing,
+      queued,
     });
   } catch (error) {
     console.error("Scheduled stream backfill failed", error);
@@ -1271,90 +1276,34 @@ async function findTracksMissingWaveform(db: D1Database): Promise<string[]> {
   return (results ?? []).map((row) => row.track_id);
 }
 
-async function analyzeMissingTracks(env: Env, tracks: TrackRecord[]) {
-  if (!tracks.length) return;
+async function enqueueTrackKeys(env: Env, keys: string[]): Promise<number> {
+  const uniqueKeys = Array.from(new Set(keys)).filter(Boolean);
+  if (!uniqueKeys.length) return 0;
+
+  const messages = uniqueKeys.map((key) => ({
+    body: {
+      eventType: "object-create",
+      object: { key },
+    },
+  }));
+
+  const batchSize = 100;
+  for (let i = 0; i < messages.length; i += batchSize) {
+    await env.TRACKS_QUEUE.sendBatch(messages.slice(i, i + batchSize));
+  }
+
+  return uniqueKeys.length;
+}
+
+async function queueMissingTracks(env: Env, tracks: TrackRecord[]): Promise<number> {
+  if (!tracks.length) return 0;
 
   const missing = await findTracksMissingWaveform(env.TRACKS_DB);
-  if (!missing.length) return;
+  if (!missing.length) return 0;
 
-  for (const trackId of missing) {
-    const record = tracks.find((t) => t.id === trackId);
-    const keyCandidates = buildTrackKeyCandidates(record?.path ?? trackId);
-
-    try {
-      const body = await (async () => {
-        const analyzer = getContainer(env.ANALYZER_CONTAINER, "waveform");
-        await analyzer.startAndWaitForPorts();
-
-        const analyzeUrl = new URL("http://container/analyze");
-        const analyzeResponse = await analyzer.fetch(
-          new Request(analyzeUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ keys: keyCandidates }),
-          }),
-        );
-
-        if (analyzeResponse.status === 404) {
-          console.warn("Missing R2 object for unanalyzed track", trackId);
-          return null;
-        }
-
-        if (!analyzeResponse.ok) {
-          console.warn(
-            "Analyzer failed while backfilling",
-            trackId,
-            analyzeResponse.status,
-          );
-          return null;
-        }
-
-        const responseBuffer = await analyzeResponse.arrayBuffer();
-        const responseSize = responseBuffer.byteLength;
-        const responseText = new TextDecoder().decode(responseBuffer);
-
-        console.log("Analyzer response", {
-          status: analyzeResponse.status,
-          size: responseSize,
-        });
-
-        if (!responseText.trim()) {
-          console.warn("Analyzer returned empty body");
-          return null;
-        }
-
-        try {
-          return JSON.parse(responseText) as Record<string, unknown>;
-        } catch (error) {
-          console.warn("Analyzer response parse failed", {
-            error: (error as Error).message,
-            size: responseSize,
-            snippet: responseText.slice(0, 200),
-          });
-          return null;
-        }
-      })();
-
-      if (!body) {
-        continue;
-      }
-
-      const waveform = body.waveform as WaveformData | undefined;
-      const bpm = (body.bpm as number | null | undefined) ?? null;
-      const beatOffsetSeconds =
-        (body.beatOffsetSeconds as number | null | undefined) ?? null;
-
-      if (waveform && Array.isArray(waveform.bars)) {
-        await saveWaveformToDb(env.TRACKS_DB, trackId, {
-          waveform,
-          bpm,
-          beatOffsetSeconds,
-        });
-      }
-    } catch (error) {
-      console.warn("Backfill analysis failed", trackId, error);
-    }
-  }
+  const trackLookup = new Map(tracks.map((track) => [track.id, track]));
+  const keys = missing.map((trackId) => trackLookup.get(trackId)?.path ?? trackId);
+  return enqueueTrackKeys(env, keys);
 }
 
 async function findTracksMissingStreams(
@@ -1377,7 +1326,7 @@ async function findTracksMissingStreams(
   return results.filter((trackId): trackId is string => Boolean(trackId));
 }
 
-async function transcodeMissingStreams(
+async function queueMissingStreams(
   env: Env,
   tracks: TrackRecord[],
 ): Promise<number> {
@@ -1387,19 +1336,8 @@ async function transcodeMissingStreams(
   if (!missing.length) return 0;
 
   const trackLookup = new Map(tracks.map((track) => [track.id, track]));
-
-  for (const trackId of missing) {
-    const record = trackLookup.get(trackId);
-    const keyCandidates = buildTrackKeyCandidates(record?.path ?? trackId);
-
-    try {
-      await transcodeTrackByKeys(env, trackId, keyCandidates);
-    } catch (error) {
-      console.warn("Stream backfill failed", trackId, error);
-    }
-  }
-
-  return missing.length;
+  const keys = missing.map((trackId) => trackLookup.get(trackId)?.path ?? trackId);
+  return enqueueTrackKeys(env, keys);
 }
 
 async function analyzeTrackByKeys(
