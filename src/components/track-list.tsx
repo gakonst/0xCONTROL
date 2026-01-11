@@ -427,7 +427,8 @@ const TrackListRow = memo(function TrackListRow({
   const canAdd = typeof onQuickAdd === "function";
   const canArchive = Boolean(onQuickArchive && quickArchiveLabel);
   const canRemove = Boolean(onQuickRemove && quickRemoveLabel);
-  const leftAction = canRemove ? "remove" : canAdd ? "add" : null;
+  const leftAction = canRemove ? "remove" : canArchive ? "archive" : null;
+  const rightAction = !canRemove && canAdd ? "add" : null;
   const fallbackInitial =
     track.title.charAt(0).toUpperCase() ||
     track.artist.charAt(0).toUpperCase() ||
@@ -498,13 +499,19 @@ const TrackListRow = memo(function TrackListRow({
 
     let handled = false;
     if (delta < -actionThreshold) {
-      if (canRemove) {
+      if (leftAction === "remove") {
         handled = onQuickRemove?.(track.id) ?? false;
-      } else if (canAdd) {
+      } else if (leftAction === "archive") {
+        handled = onQuickArchive?.(track.id) ?? false;
+      } else if (leftAction === "add") {
         handled = onQuickAdd?.(track.id) ?? false;
       }
-    } else if (canArchive && delta > actionThreshold) {
-      handled = onQuickArchive?.(track.id) ?? false;
+    } else if (delta > actionThreshold) {
+      if (rightAction === "add") {
+        handled = onQuickAdd?.(track.id) ?? false;
+      } else if (rightAction === "archive") {
+        handled = onQuickArchive?.(track.id) ?? false;
+      }
     }
 
     if (handled || Math.abs(delta) > 6) {
@@ -537,7 +544,7 @@ const TrackListRow = memo(function TrackListRow({
   const leftProgress = leftAction
     ? Math.min(Math.max(-dragOffset / actionThreshold, 0), 1)
     : 0;
-  const archiveProgress = canArchive
+  const rightProgress = rightAction
     ? Math.min(Math.max(dragOffset / actionThreshold, 0), 1)
     : 0;
 
@@ -558,47 +565,68 @@ const TrackListRow = memo(function TrackListRow({
 
   return (
     <div ref={rowRef} className="relative overflow-hidden">
-      {(leftAction || canArchive) && (
+      {(leftAction || rightAction) && (
         <>
           <div className="pointer-events-none absolute inset-0 flex overflow-hidden">
             <div
               className={
                 leftAction === "remove"
                   ? "flex-1 bg-rose-500/15"
-                  : "flex-1 bg-emerald-500/15"
+                  : leftAction === "archive"
+                    ? "flex-1 bg-amber-500/15"
+                    : "flex-1 bg-emerald-500/15"
               }
               style={{ opacity: leftProgress > 0 ? leftProgress : 0 }}
             />
             <div
-              className="flex-1 bg-amber-500/15"
-              style={{ opacity: archiveProgress > 0 ? archiveProgress : 0 }}
+              className={
+                rightAction === "add"
+                  ? "flex-1 bg-emerald-500/15"
+                  : "flex-1 bg-amber-500/15"
+              }
+              style={{ opacity: rightProgress > 0 ? rightProgress : 0 }}
             />
           </div>
           {leftAction && (
             <div
               className={cn(
                 "pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 md:pl-5",
-                leftAction === "remove" ? "text-rose-100" : "text-emerald-100",
+                leftAction === "remove"
+                  ? "text-rose-100"
+                  : leftAction === "archive"
+                    ? "text-amber-100"
+                    : "text-emerald-100",
               )}
               style={{
                 opacity: leftProgress > 0 ? Math.min(1, leftProgress + 0.2) : 0,
               }}
             >
-              <span className="text-xl font-semibold">
-                {leftAction === "remove" ? "-" : "+"}
-              </span>
+              {leftAction === "archive" ? (
+                <span className="text-lg">🗄</span>
+              ) : (
+                <span className="text-xl font-semibold">
+                  {leftAction === "remove" ? "-" : "+"}
+                </span>
+              )}
             </div>
           )}
-          {canArchive && (
+          {rightAction && (
             <div
-              className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-amber-100 md:pr-5"
+              className={cn(
+                "pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 md:pr-5",
+                rightAction === "add" ? "text-emerald-100" : "text-amber-100",
+              )}
               style={{
-                opacity: archiveProgress > 0
-                  ? Math.min(1, archiveProgress + 0.2)
+                opacity: rightProgress > 0
+                  ? Math.min(1, rightProgress + 0.2)
                   : 0,
               }}
             >
-              <span className="text-lg">🗄</span>
+              {rightAction === "add" ? (
+                <span className="text-xl font-semibold">+</span>
+              ) : (
+                <span className="text-lg">🗄</span>
+              )}
             </div>
           )}
         </>

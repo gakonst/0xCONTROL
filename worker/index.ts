@@ -874,6 +874,11 @@ export default {
       return honoResponse;
     }
 
+    const url = new URL(request.url);
+    if (isApiPath(url.pathname)) {
+      return honoResponse;
+    }
+
     // Rebuild the request without a consumed body to satisfy asset handler.
     const assetRequest = new Request(request.url, request);
     return serveAssets(assetRequest, env);
@@ -1889,6 +1894,14 @@ async function serveAssets(request: Request, env: Env): Promise<Response> {
 
 function shouldServeSPA(url: URL): boolean {
   return !url.pathname.split("/").at(-1)?.includes(".");
+}
+
+function isApiPath(pathname: string): boolean {
+  return (
+    pathname === "/api" ||
+    pathname.startsWith("/api/") ||
+    pathname.startsWith("/streams/")
+  );
 }
 
 function buildTrackKeyCandidates(rawTrackId?: string): string[] {
