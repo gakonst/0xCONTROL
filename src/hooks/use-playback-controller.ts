@@ -10,7 +10,6 @@ import {
 import Hls from "hls.js";
 
 import { getTrackStreamUrl, getTrackUrl, type Track } from "@/data/tracks";
-import { prefetchStreamFull } from "@/lib/stream-prefetch";
 
 type PlaybackController = {
   currentTrackId: string;
@@ -48,7 +47,6 @@ export function usePlaybackController(
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const trackUrlRef = useRef<string>("");
   const hlsRef = useRef<any | null>(null);
-  const prefetchAbortRef = useRef<AbortController | null>(null);
   const goToNextTrackRef = useRef<() => void>(() => {});
   const tracksRef = useRef<Track[]>(tracks);
 
@@ -157,8 +155,6 @@ export function usePlaybackController(
     audioRef.current?.pause();
     hlsRef.current?.destroy();
     hlsRef.current = null;
-    prefetchAbortRef.current?.abort();
-    prefetchAbortRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -254,23 +250,6 @@ export function usePlaybackController(
       audio.removeEventListener("error", handleError);
     };
   }, [currentTrack, currentTrackId, isPlaying]);
-
-  useEffect(() => {
-    if (!currentTrack || !isPlaying) {
-      prefetchAbortRef.current?.abort();
-      prefetchAbortRef.current = null;
-      return;
-    }
-
-    prefetchAbortRef.current?.abort();
-    const controller = new AbortController();
-    prefetchAbortRef.current = controller;
-    void prefetchStreamFull(currentTrack.id, { signal: controller.signal });
-
-    return () => {
-      controller.abort();
-    };
-  }, [currentTrack?.id, isPlaying]);
 
   const handleTogglePlay = useCallback(() => {
     setIsPlaying((prev) => !prev);

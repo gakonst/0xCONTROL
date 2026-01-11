@@ -51,12 +51,10 @@ async function prefetchStream(
     const segments = await resolvePlaylistSegments(playlistUrl, options.signal);
     if (!segments.length) return;
 
-    const targets =
-      options.mode === "preview"
-        ? segments.slice(0, options.maxSegments ?? DEFAULT_PREVIEW_SEGMENTS)
-        : segments;
-
-    await prefetchUrls(targets, options.signal);
+    const initSegment = segments.find((segment) => segment.includes("init.mp4"));
+    if (initSegment) {
+      await prefetchUrls([initSegment], options.signal);
+    }
   })();
 
   inFlight.set(inFlightKey, task);
@@ -149,7 +147,11 @@ function parsePlaylist(text: string, baseUrl: string): {
 
 function resolveUrl(path: string, baseUrl: string): string {
   try {
-    return new URL(path, baseUrl).toString();
+    const resolvedBase =
+      typeof window !== "undefined"
+        ? new URL(baseUrl, window.location.href)
+        : new URL(baseUrl, "http://localhost");
+    return new URL(path, resolvedBase).toString();
   } catch {
     return path;
   }
