@@ -1,4 +1,4 @@
-import { createConfig, http } from 'wagmi'
+import { createConfig, http, type Config } from 'wagmi'
 import { mainnet, optimism, polygon, sepolia } from 'wagmi/chains'
 import { injected, walletConnect } from 'wagmi/connectors'
 
@@ -22,7 +22,7 @@ const connectors = [
     : []),
 ]
 
-export const config = createConfig({
+export const config: Config = createConfig({
   chains,
   connectors,
   transports,
