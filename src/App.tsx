@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useIsRestoring, useQuery } from "@tanstack/react-query";
 
 import { FullScreenPlayer } from "@/components/fullscreen-player";
 import { LibraryFooter } from "@/components/library-footer";
@@ -24,11 +24,12 @@ import { getInitialUrlState, type LibraryView } from "@/lib/library-state";
 function App() {
   const initialUrlState = getInitialUrlState();
 
-  const { data: fetchedTracks } = useQuery({
+  const { data: fetchedTracks, isLoading: isTracksLoading } = useQuery({
     queryKey: ["catalog"],
     queryFn: ({ signal }) => fetchCatalogTracks(signal),
   });
   const tracks = fetchedTracks ?? [];
+  const isRestoring = useIsRestoring();
 
   const playbackApi = usePlaybackApi(tracks, initialUrlState.trackId);
 
@@ -43,6 +44,7 @@ function App() {
   const playlists = playlistsApi.data;
   const setPlaylists = playlistsApi.setData;
   const { togglePlaylistPin, deletePlaylist } = playlistsApi.actions;
+  const isPlaylistsLoading = playlistsApi.isLoading || isRestoring;
   const [preferredPlaylistId, setPreferredPlaylistId] = useState<string | null>(
     null,
   );
@@ -205,8 +207,10 @@ function App() {
         <LibraryViewRouter
           navigation={navigation}
           playlists={playlists}
+          isPlaylistsLoading={isPlaylistsLoading}
           tracks={tracks}
           visibleTracks={visibleTracks}
+          isTracksLoading={isTracksLoading || isRestoring}
           activeTrackId={currentTrack?.id ?? ""}
           onTrackSelect={handleTrackSelect}
           onPlaylistSelect={handlePlaylistSelect}
@@ -243,8 +247,9 @@ function App() {
         />
       </div>
 
-      {isFullScreenPlayerOpen && currentTrack && (
+      {currentTrack && (
         <FullScreenPlayer
+          isOpen={isFullScreenPlayerOpen}
           track={currentTrack}
           isPlaying={playbackApi.state.isPlaying}
           isBuffering={playbackApi.state.isBuffering}

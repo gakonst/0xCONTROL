@@ -1,4 +1,7 @@
-const CACHE_NAME = '0xcontrol-static-v2'
+const CACHE_NAME = '0xcontrol-static-v3'
+const API_CACHE = '0xcontrol-api-v1'
+const ACTIVE_CACHES = new Set([CACHE_NAME, API_CACHE])
+const API_PATHS = new Set(['/api/catalog', '/api/playlists'])
 const CORE_ASSETS = [
   '/index.html',
   '/manifest.webmanifest',
@@ -16,7 +19,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))),
+      Promise.all(keys.filter((key) => !ACTIVE_CACHES.has(key)).map((key) => caches.delete(key))),
     ),
   )
   self.clients.claim()
@@ -30,6 +33,11 @@ self.addEventListener('fetch', (event) => {
 
   const requestUrl = new URL(request.url)
   if (requestUrl.origin !== self.location.origin) {
+    return
+  }
+
+  if (API_PATHS.has(requestUrl.pathname)) {
+    event.respondWith(staleWhileRevalidate(event, request, API_CACHE))
     return
   }
 
@@ -81,3 +89,26 @@ self.addEventListener('fetch', (event) => {
     }),
   )
 })
+
+async function staleWhileRevalidate(event, request, cacheName) {
+  const cache = await caches.open(cacheName)
+  const cached = await cache.match(request)
+
+  const networkPromise = fetch(request)
+    .then((response) => {
+      if (response && response.ok) {
+        cache.put(request, response.clone())
+      }
+      return response
+    })
+    .catch(() => undefined)
+
+  if (cached) {
+    event.waitUntil(networkPromise)
+    return cached
+  }
+
+  const networkResponse = await networkPromise
+  if (networkResponse) return networkResponse
+  throw new Error('Network error and no cache for request')
+}

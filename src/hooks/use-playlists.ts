@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useIsRestoring, useQuery } from "@tanstack/react-query";
 
 import {
   addTrackToPlaylist as addTrackToPlaylistApi,
@@ -16,12 +16,15 @@ export function usePlaylists() {
   const {
     data: fetchedPlaylists,
     refetch: refetchPlaylists,
+    isLoading,
+    isError,
   } = useQuery({
     queryKey: ["playlists"],
     queryFn: ({ signal }) => fetchPlaylists(signal),
   });
 
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const isRestoring = useIsRestoring();
 
   useEffect(() => {
     if (Array.isArray(fetchedPlaylists)) {
@@ -173,6 +176,13 @@ export function usePlaylists() {
     data: playlists,
     setData: setPlaylists,
     refetch: refetchPlaylists,
+    isLoading:
+      !isError &&
+      (isRestoring ||
+        isLoading ||
+        (playlists.length === 0 &&
+          Array.isArray(fetchedPlaylists) &&
+          fetchedPlaylists.length > 0)),
     actions: {
       addTrackToPlaylist,
       removeTrackFromPlaylist,

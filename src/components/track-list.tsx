@@ -25,6 +25,7 @@ type QuickActionHandler = (trackId: string) => boolean;
 
 type TrackListProps = {
   tracks: Track[];
+  isLoading?: boolean;
   activeTrackId: string;
   onSelect: (track: Track) => void;
   className?: string;
@@ -84,6 +85,7 @@ const formatTotalDuration = (tracks: Track[]) => {
 
 export function TrackList({
   tracks,
+  isLoading = false,
   activeTrackId,
   onSelect,
   className,
@@ -108,6 +110,7 @@ export function TrackList({
     useState<TrackSortField>(null);
   const [uncontrolledSortDirection, setUncontrolledSortDirection] =
     useState<TrackSortDirection>("asc");
+  const [showLoading, setShowLoading] = useState(false);
 
   const isSortControlled =
     controlledSortField !== undefined &&
@@ -175,8 +178,24 @@ export function TrackList({
   const totalDurationLabel = formatTotalDuration(sortedTracks);
   const isFilteredView =
     searchCriteria.hasFilters || sortedTracks.length !== annotatedTracks.length;
+  const isInitialLoading = isLoading && tracks.length === 0;
+  useEffect(() => {
+    if (!isInitialLoading) {
+      setShowLoading(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setShowLoading(true);
+    }, 160);
+
+    return () => window.clearTimeout(timer);
+  }, [isInitialLoading]);
   const showEmptyState =
-    sortedTracks.length === 0 && !isFilteredView && Boolean(emptyState);
+    sortedTracks.length === 0 &&
+    !isFilteredView &&
+    Boolean(emptyState) &&
+    !isInitialLoading;
 
   const updateSort = (field: TrackSortField, direction: TrackSortDirection) => {
     if (isSortControlled) {
@@ -321,7 +340,13 @@ export function TrackList({
             </div>
           </button>
         )}
-        {showEmptyState ? (
+        {isInitialLoading && showLoading ? (
+          <div className="mx-4 mt-10 rounded-none border border-white/10 bg-white/5 px-5 py-6 text-center text-white/70 md:mx-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.12rem] text-white/70">
+              Loading tracks...
+            </p>
+          </div>
+        ) : showEmptyState ? (
           <div className="mx-4 mt-10 rounded-none border border-white/10 bg-white/5 px-5 py-6 text-center text-white/80 md:mx-6">
             <p className="text-sm font-semibold uppercase tracking-[0.12rem] text-white/80">
               {emptyState?.title}

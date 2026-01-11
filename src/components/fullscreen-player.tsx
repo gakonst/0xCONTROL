@@ -13,6 +13,7 @@ import type { WaveformData } from "@/lib/waveform";
 import type { TrackAnnotation } from "@/types/annotations";
 
 type FullScreenPlayerProps = {
+  isOpen: boolean;
   track: Track;
   isPlaying: boolean;
   isBuffering: boolean;
@@ -34,6 +35,7 @@ type FullScreenPlayerProps = {
 };
 
 export function FullScreenPlayer({
+  isOpen,
   track,
   isPlaying,
   isBuffering,
@@ -104,9 +106,13 @@ export function FullScreenPlayer({
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setControlsInteractive(true), 280);
-    return () => window.clearTimeout(timer);
-  }, []);
+    if (!isOpen) {
+      setControlsInteractive(false);
+      return;
+    }
+
+    setControlsInteractive(true);
+  }, [isOpen]);
 
   useEffect(() => {
     const measure = () => {
@@ -125,7 +131,14 @@ export function FullScreenPlayer({
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-background text-white">
+    <div
+      className={`fixed inset-0 z-50 flex flex-col overflow-hidden bg-background text-white ${
+        isOpen
+          ? "pointer-events-auto opacity-100 transition-none"
+          : "pointer-events-none opacity-0 transition-none invisible"
+      }`}
+      aria-hidden={!isOpen}
+    >
       <div className="absolute inset-0 -z-10 opacity-40">
         {track.cover ? (
           <img

@@ -19,6 +19,7 @@ export type PlaylistSortDirection = "asc" | "desc";
 
 type PlaylistBrowserProps = {
   playlists: Playlist[];
+  isLoading?: boolean;
   tracks: Track[];
   onSelect: (playlistId: string) => void;
   folderPath: string[];
@@ -33,6 +34,7 @@ type PlaylistBrowserProps = {
 
 export function PlaylistBrowser({
   playlists,
+  isLoading = false,
   tracks,
   onSelect,
   folderPath,
@@ -46,12 +48,26 @@ export function PlaylistBrowser({
 }: PlaylistBrowserProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Playlist | null>(null);
+  const [showLoading, setShowLoading] = useState(false);
   const activeFolderPath = folderPath;
   const isSearching = searchQuery.trim().length > 0;
 
   const trackMap = useMemo(() => {
     return new Map(tracks.map((track) => [track.id, track]));
   }, [tracks]);
+
+  useEffect(() => {
+    if (!isLoading) {
+      setShowLoading(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setShowLoading(true);
+    }, 160);
+
+    return () => window.clearTimeout(timer);
+  }, [isLoading]);
 
   useEffect(() => {
     if (!activeFolderPath.length) return;
@@ -324,6 +340,18 @@ export function PlaylistBrowser({
     );
   };
 
+  if (isLoading && !showLoading) {
+    return <section className="h-full w-full" />;
+  }
+
+  if (isLoading) {
+    return (
+      <section className="flex h-full flex-col items-center justify-center gap-2 border border-dashed border-white/10 bg-black/30 text-center text-sm text-muted-foreground">
+        <p>Loading playlists...</p>
+      </section>
+    );
+  }
+
   if (!playlists.length) {
     return (
       <section className="flex h-full flex-col items-center justify-center gap-2 border border-dashed border-white/10 bg-black/30 text-center text-sm text-muted-foreground">
@@ -382,7 +410,7 @@ export function PlaylistBrowser({
         extraControls={extraControls}
       />
       <div className="flex-1 overflow-auto pb-6">
-        {isEmpty && (
+        {isEmpty && !isLoading && (
           <div className="flex h-full flex-col items-center justify-center gap-2 border border-dashed border-white/10 bg-black/30 text-center text-sm text-muted-foreground">
             <p>No playlists yet.</p>
             <p className="text-xs text-white/60">

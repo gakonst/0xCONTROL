@@ -28,8 +28,10 @@ function Layer({ active, children, ariaHidden }: LayerProps) {
   return (
     <div
       className={cn(
-        "absolute inset-0 h-full w-full transition-opacity duration-150",
-        active ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
+        "absolute inset-0 h-full w-full",
+        active
+          ? "opacity-100 pointer-events-auto transition-none"
+          : "opacity-0 pointer-events-none transition-none invisible",
       )}
       aria-hidden={ariaHidden}
     >
@@ -41,8 +43,10 @@ function Layer({ active, children, ariaHidden }: LayerProps) {
 export type LibraryViewRouterProps = {
   navigation: LibraryNavigationApi;
   playlists: Playlist[];
+  isPlaylistsLoading: boolean;
   tracks: Track[];
   visibleTracks: Track[];
+  isTracksLoading: boolean;
   activeTrackId: string;
   onTrackSelect: (track: Track) => void;
   onPlaylistSelect: (playlistId: string) => void;
@@ -77,8 +81,10 @@ export type LibraryViewRouterProps = {
 export function LibraryViewRouter({
   navigation,
   playlists,
+  isPlaylistsLoading,
   tracks,
   visibleTracks,
+  isTracksLoading,
   activeTrackId,
   onTrackSelect,
   onPlaylistSelect,
@@ -124,6 +130,7 @@ export function LibraryViewRouter({
       <Layer active={isPlaylists} ariaHidden={!isPlaylists}>
         <PlaylistBrowser
           playlists={playlists}
+          isLoading={isPlaylistsLoading}
           tracks={tracks}
           onSelect={onPlaylistSelect}
           folderPath={folderPath}
@@ -145,6 +152,7 @@ export function LibraryViewRouter({
         <TrackList
           className="h-full w-full"
           tracks={visibleTracks}
+          isLoading={isTracksLoading && visibleTracks.length === 0}
           activeTrackId={activeTrackId}
           onSelect={onTrackSelect}
           header={header}
