@@ -2,6 +2,7 @@
 tracks/
 cloudflare-r2-dev-server/
 .env.local
+.dev.vars
 
 
 # Logs

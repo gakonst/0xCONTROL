@@ -19,7 +19,51 @@ type LibraryHeaderProps = {
   };
   extraControls?: ReactNode;
   showClearButton?: boolean;
+  showSearchControls?: boolean;
 };
+
+export type LibrarySearchControlsProps = Pick<
+  LibraryHeaderProps,
+  "search" | "onClearSearch" | "extraControls" | "showClearButton"
+> & {
+  className?: string;
+};
+
+export function LibrarySearchControls({
+  search,
+  onClearSearch,
+  extraControls,
+  showClearButton = true,
+  className,
+}: LibrarySearchControlsProps) {
+  return (
+    <div className={className}>
+      <label htmlFor={search.id} className="sr-only">
+        {search.label ?? "Search"}
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          id={search.id}
+          type="search"
+          value={search.value}
+          onChange={(event) => search.onChange(event.target.value)}
+          placeholder={search.placeholder}
+          className="w-full border border-white/20 bg-white/5 px-3 py-2 text-xs text-white placeholder:text-white/60 focus:outline-none focus:ring-1 focus:ring-white/40"
+        />
+        {search.value && showClearButton && (
+          <button
+            type="button"
+            onClick={onClearSearch ? onClearSearch : () => search.onChange("")}
+            className="border border-white/40 px-3 py-2 text-[0.55rem] uppercase tracking-tight text-white transition hover:bg-white/10"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {extraControls && <div className="mt-2">{extraControls}</div>}
+    </div>
+  );
+}
 
 export function LibraryHeader({
   title,
@@ -31,6 +75,7 @@ export function LibraryHeader({
   backAction,
   extraControls,
   showClearButton = true,
+  showSearchControls = true,
 }: LibraryHeaderProps) {
   return (
     <header className="px-3.5 py-4 md:px-5">
@@ -58,37 +103,15 @@ export function LibraryHeader({
         <p className="text-[0.55rem] uppercase tracking-[0.08rem] text-muted-foreground/80">
           {stats}
         </p>
-        <div className="mt-3 flex flex-col gap-2">
-          <div>
-            <label htmlFor={search.id} className="sr-only">
-              {search.label ?? "Search"}
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                id={search.id}
-                type="search"
-                value={search.value}
-                onChange={(event) => search.onChange(event.target.value)}
-                placeholder={search.placeholder}
-                className="w-full border border-white/20 bg-white/5 px-3 py-2 text-xs text-white placeholder:text-white/60 focus:outline-none focus:ring-1 focus:ring-white/40"
-              />
-              {search.value && showClearButton && (
-                <button
-                  type="button"
-                  onClick={
-                    onClearSearch
-                      ? onClearSearch
-                      : () => search.onChange("")
-                  }
-                  className="border border-white/40 px-3 py-2 text-[0.55rem] uppercase tracking-tight text-white transition hover:bg-white/10"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-          </div>
-          {extraControls}
-        </div>
+        {showSearchControls && (
+          <LibrarySearchControls
+            search={search}
+            onClearSearch={onClearSearch}
+            extraControls={extraControls}
+            showClearButton={showClearButton}
+            className="mt-3"
+          />
+        )}
       </div>
     </header>
   );

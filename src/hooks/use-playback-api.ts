@@ -22,6 +22,7 @@ export type PlaybackApi = {
   };
   liveTimeGetter: () => number;
   setCurrentTrackId: (id: string) => void;
+  setQueue: (trackIds: string[]) => void;
   audioRef: ReturnType<typeof usePlaybackController>["audioRef"];
 };
 
@@ -49,6 +50,7 @@ export function usePlaybackApi(tracks: Track[], initialTrackId?: string): Playba
     },
     liveTimeGetter: controller.liveTimeGetter,
     setCurrentTrackId: controller.setCurrentTrackId,
+    setQueue: controller.setQueue,
     audioRef: controller.audioRef,
   };
 }

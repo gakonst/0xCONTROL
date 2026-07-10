@@ -1,4 +1,4 @@
-import { buildApiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import type { TrackAnnotation } from "@/types/annotations";
 
 export type UpdateTrackAnnotationPayload = Partial<TrackAnnotation>;
@@ -8,8 +8,8 @@ export async function updateTrackAnnotation(
   payload: UpdateTrackAnnotationPayload,
 ): Promise<TrackAnnotation | undefined> {
   const encodedId = encodeURIComponent(trackId);
-  const response = await fetch(
-    buildApiUrl(`/api/tracks/${encodedId}/annotation`),
+  const response = await apiFetch(
+    `/api/tracks/${encodedId}/annotation`,
     {
       method: "PATCH",
       headers: {

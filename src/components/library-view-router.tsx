@@ -10,6 +10,7 @@ import {
 import type { LibraryView } from "@/lib/library-state";
 import type { Track } from "@/data/tracks";
 import type { Playlist } from "@/types/playlists";
+import type { PlaylistMetaUpdates } from "@/data/playlists";
 import type { TrackAnnotation } from "@/types/annotations";
 import type {
   PlaylistSortDirection,
@@ -55,6 +56,10 @@ export type LibraryViewRouterProps = {
   folderPath: string[];
   onTogglePin: (playlistId: string) => void;
   onDeletePlaylist: (playlistId: string) => void;
+  onUpdatePlaylist?: (
+    playlistId: string,
+    updates: PlaylistMetaUpdates,
+  ) => Promise<Playlist | null>;
   header?: {
     title: string;
     backLabel?: string;
@@ -68,6 +73,7 @@ export type LibraryViewRouterProps = {
   onQuickArchiveToPlaylist?: (trackId: string) => boolean;
   quickRemoveLabel?: string;
   onQuickRemoveFromPlaylist?: (trackId: string) => boolean;
+  onMoveTrack?: (trackId: string, direction: -1 | 1) => boolean;
   annotations: Record<string, TrackAnnotation>;
   playback: {
     trackId: string;
@@ -92,6 +98,7 @@ export function LibraryViewRouter({
   folderPath,
   onTogglePin,
   onDeletePlaylist,
+  onUpdatePlaylist,
   onPlaylistCreated,
   header,
   quickAddLabel,
@@ -100,6 +107,7 @@ export function LibraryViewRouter({
   onQuickArchiveToPlaylist,
   quickRemoveLabel,
   onQuickRemoveFromPlaylist,
+  onMoveTrack,
   annotations,
   playback,
 }: LibraryViewRouterProps) {
@@ -141,6 +149,8 @@ export function LibraryViewRouter({
           onSortReset={handlePlaylistSortReset}
           onTogglePin={onTogglePin}
           onDeletePlaylist={onDeletePlaylist}
+          onUpdatePlaylist={onUpdatePlaylist}
+          footerToolsActive={isPlaylists}
         />
       </Layer>
 
@@ -166,6 +176,7 @@ export function LibraryViewRouter({
           onQuickArchiveToPlaylist={onQuickArchiveToPlaylist}
           quickRemoveLabel={quickRemoveLabel}
           onQuickRemoveFromPlaylist={onQuickRemoveFromPlaylist}
+          onMoveTrack={onMoveTrack}
           annotations={annotations}
           emptyState={
             view.type === "home"
@@ -177,6 +188,7 @@ export function LibraryViewRouter({
               : undefined
           }
           playback={playback}
+          footerToolsActive={isTracks}
         />
       </Layer>
     </div>

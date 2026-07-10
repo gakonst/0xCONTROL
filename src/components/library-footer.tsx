@@ -6,6 +6,10 @@ import { LibraryTabs, type LibraryTabKey } from "@/components/library-tabs";
 import type { Track } from "@/data/tracks";
 import type { TrackAnnotation } from "@/types/annotations";
 import type { WaveformData } from "@/lib/waveform";
+import {
+  PLAYLIST_FOOTER_TOOLS_TARGET_ID,
+  TRACK_FOOTER_TOOLS_TARGET_ID,
+} from "@/components/footer-tools-portal";
 
 export type LibraryFooterProps = {
   track: Track;
@@ -25,6 +29,9 @@ export type LibraryFooterProps = {
   onOpenFullScreen: () => void;
   activeTab: LibraryTabKey;
   onTabChange: (tab: LibraryTabKey) => void;
+  isSearchOpen?: boolean;
+  onSearchToggle?: () => void;
+  searchToolsKey?: "tracks" | "playlists";
   extra?: ReactNode;
 };
 
@@ -46,6 +53,9 @@ function LibraryFooterComponent({
   onOpenFullScreen,
   activeTab,
   onTabChange,
+  isSearchOpen = false,
+  onSearchToggle,
+  searchToolsKey = "tracks",
   extra,
 }: LibraryFooterProps) {
   const handleAnnotationChange = onAnnotationChange ?? (() => {});
@@ -75,8 +85,29 @@ function LibraryFooterComponent({
         onOpenFullScreen={onOpenFullScreen}
       />
       {extra}
+      <div
+        id={TRACK_FOOTER_TOOLS_TARGET_ID}
+        className={
+          isSearchOpen && searchToolsKey === "tracks"
+            ? "border-t border-white/10 bg-black/70"
+            : "hidden"
+        }
+      />
+      <div
+        id={PLAYLIST_FOOTER_TOOLS_TARGET_ID}
+        className={
+          isSearchOpen && searchToolsKey === "playlists"
+            ? "border-t border-white/10 bg-black/70"
+            : "hidden"
+        }
+      />
       <div className="border-t border-white/10">
-        <LibraryTabs activeTab={activeTab} onTabChange={onTabChange} />
+        <LibraryTabs
+          activeTab={activeTab}
+          onTabChange={onTabChange}
+          isSearchOpen={isSearchOpen}
+          onSearchToggle={onSearchToggle}
+        />
       </div>
     </div>
   );

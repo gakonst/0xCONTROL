@@ -1,5 +1,5 @@
 const CACHE_NAME = '0xcontrol-static-v3'
-const API_CACHE = '0xcontrol-api-v1'
+const API_CACHE = '0xcontrol-api-v2'
 const ACTIVE_CACHES = new Set([CACHE_NAME, API_CACHE])
 const API_PATHS = new Set(['/api/catalog', '/api/playlists'])
 const CORE_ASSETS = [
@@ -37,7 +37,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (API_PATHS.has(requestUrl.pathname)) {
-    event.respondWith(staleWhileRevalidate(event, request, API_CACHE))
+    event.respondWith(networkFirst(request, API_CACHE))
     return
   }
 
@@ -90,25 +90,17 @@ self.addEventListener('fetch', (event) => {
   )
 })
 
-async function staleWhileRevalidate(event, request, cacheName) {
+async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName)
-  const cached = await cache.match(request)
-
-  const networkPromise = fetch(request)
-    .then((response) => {
-      if (response && response.ok) {
-        cache.put(request, response.clone())
-      }
-      return response
-    })
-    .catch(() => undefined)
-
-  if (cached) {
-    event.waitUntil(networkPromise)
-    return cached
+  try {
+    const response = await fetch(request)
+    if (response && response.ok) {
+      await cache.put(request, response.clone())
+    }
+    return response
+  } catch (error) {
+    const cached = await cache.match(request)
+    if (cached) return cached
+    throw error
   }
-
-  const networkResponse = await networkPromise
-  if (networkResponse) return networkResponse
-  throw new Error('Network error and no cache for request')
 }

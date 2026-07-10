@@ -7,16 +7,33 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { ArrowDown, ArrowUp, Download } from "lucide-react";
 
 import { Track } from "@/data/tracks";
 import type { TrackAnnotation } from "@/types/annotations";
 import { cn } from "@/lib/utils";
-import { LibraryHeader } from "@/components/library-header";
+import {
+  LibraryHeader,
+  LibrarySearchControls,
+} from "@/components/library-header";
+import {
+  FooterToolsPortal,
+  TRACK_FOOTER_TOOLS_TARGET_ID,
+} from "@/components/footer-tools-portal";
 import { OverviewCanvas } from "@/components/waveform-canvas";
 import { useWaveform } from "@/hooks/use-waveform";
 import { prefetchStreamPreview } from "@/lib/stream-prefetch";
 import { useOnScreen } from "@/hooks/use-on-screen";
 import { formatSecondsToClock } from "@/lib/time";
+import { useDownloads } from "@/components/download-status";
+import { getPlaylistDownloadUrl } from "@/lib/downloads";
+import { getTrackDownloadUrl } from "@/lib/downloads";
+import {
+  ActionSheet,
+  ActionSheetClose,
+  ActionSheetContent,
+  SheetAction,
+} from "@/components/ui/action-sheet";
 
 export type TrackSortField = "title" | "bpm" | "key" | null;
 export type TrackSortDirection = "asc" | "desc";
@@ -27,7 +44,11 @@ type TrackListProps = {
   tracks: Track[];
   isLoading?: boolean;
   activeTrackId: string;
-  onSelect: (track: Track) => void;
+  onSelect: (
+    track: Track,
+    displayedQueue?: Track[],
+    followsCanonicalOrder?: boolean,
+  ) => void;
   className?: string;
   header?: TrackListHeaderConfig;
   sortField?: TrackSortField;
@@ -40,6 +61,7 @@ type TrackListProps = {
   onQuickArchiveToPlaylist?: QuickActionHandler;
   quickRemoveLabel?: string;
   onQuickRemoveFromPlaylist?: QuickActionHandler;
+  onMoveTrack?: (trackId: string, direction: -1 | 1) => boolean;
   annotations?: Record<string, TrackAnnotation>;
   emptyState?: {
     title: string;
@@ -52,6 +74,7 @@ type TrackListProps = {
     durationSeconds?: number | null;
     liveTimeGetter?: () => number;
   };
+  footerToolsActive?: boolean;
 };
 
 type TrackListHeaderConfig = {
@@ -62,6 +85,7 @@ type TrackListHeaderConfig = {
   backLabel?: string;
   backDestinationLabel?: string;
   showFullBackRow?: boolean;
+  playlistId?: string;
 };
 
 const formatTotalDuration = (tracks: Track[]) => {
@@ -100,10 +124,13 @@ export function TrackList({
   onQuickArchiveToPlaylist,
   quickRemoveLabel,
   onQuickRemoveFromPlaylist,
+  onMoveTrack,
   annotations,
   emptyState,
   playback,
+  footerToolsActive = false,
 }: TrackListProps) {
+  const { startDownload } = useDownloads();
   const annotationMap = annotations ?? {};
   const [searchQuery, setSearchQuery] = useState("");
   const [uncontrolledSortField, setUncontrolledSortField] =
@@ -111,6 +138,7 @@ export function TrackList({
   const [uncontrolledSortDirection, setUncontrolledSortDirection] =
     useState<TrackSortDirection>("asc");
   const [showLoading, setShowLoading] = useState(false);
+  const [actionTrack, setActionTrack] = useState<Track | null>(null);
 
   const isSortControlled =
     controlledSortField !== undefined &&
@@ -233,6 +261,9 @@ export function TrackList({
   ];
 
   const headingTitle = header?.title ?? "Collection";
+  const actionTrackIndex = actionTrack
+    ? tracks.findIndex((track) => track.id === actionTrack.id)
+    : -1;
 
   const statsLine = [
     `${sortedTracks.length} tracks`,
@@ -243,7 +274,8 @@ export function TrackList({
     .join(" • ");
 
   const extraControls = (
-    <div className="grid grid-cols-4 gap-1 text-[0.6rem] font-semibold uppercase tracking-[0.08rem] text-muted-foreground/90 md:text-[0.65rem]">
+    <div className="space-y-1">
+      <div className="grid grid-cols-4 gap-1 text-[0.6rem] font-semibold uppercase tracking-[0.08rem] text-muted-foreground/90 md:text-[0.65rem]">
       {sortOptions.map((option) => {
         const isActive = sortField === option.value;
 
@@ -279,6 +311,22 @@ export function TrackList({
       >
         Reset
       </button>
+      </div>
+      {header?.playlistId && (
+        <button
+          type="button"
+          onClick={() =>
+            startDownload(
+              getPlaylistDownloadUrl(header.playlistId!),
+              `${headingTitle}.zip`,
+            )
+          }
+          disabled={tracks.length === 0}
+          className="w-full border border-white/30 px-2 py-1 text-center text-[0.6rem] font-semibold uppercase tracking-[0.08rem] text-foreground transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 md:text-[0.65rem]"
+        >
+          Download playlist ZIP
+        </button>
+      )}
     </div>
   );
 
@@ -289,6 +337,23 @@ export function TrackList({
         className,
       )}
     >
+      <FooterToolsPortal
+        active={footerToolsActive}
+        targetId={TRACK_FOOTER_TOOLS_TARGET_ID}
+      >
+        <LibrarySearchControls
+          search={{
+            id: "track-search",
+            value: searchQuery,
+            placeholder: 'Search titles, artists, or use "bpm:>130"',
+            label: "Search tracks",
+            onChange: setSearchQuery,
+          }}
+          onClearSearch={() => setSearchQuery("")}
+          extraControls={extraControls}
+          className="px-4 py-3"
+        />
+      </FooterToolsPortal>
       <LibraryHeader
         title={headingTitle}
         eyebrow={header?.eyebrow}
@@ -303,6 +368,7 @@ export function TrackList({
           onChange: setSearchQuery,
         }}
         onClearSearch={() => setSearchQuery("")}
+        showSearchControls={false}
         backAction={
           header?.onBack && !showFullBackRow
             ? {
@@ -363,7 +429,14 @@ export function TrackList({
               key={track.id}
               track={track}
               isActive={activeTrackId === track.id}
-              onSelect={onSelect}
+              onSelect={(selected) =>
+                onSelect(
+                  selected,
+                  sortedTracks,
+                  !sortField && !searchCriteria.hasFilters,
+                )
+              }
+              onOpenActions={setActionTrack}
               onQuickAdd={quickAddEnabled ? onQuickAddToPlaylist : undefined}
               onQuickArchive={
                 quickArchiveEnabled ? onQuickArchiveToPlaylist : undefined
@@ -381,6 +454,50 @@ export function TrackList({
           ))
         )}
       </div>
+      <ActionSheet
+        open={Boolean(actionTrack)}
+        onOpenChange={(open) => !open && setActionTrack(null)}
+      >
+        {actionTrack && (
+          <ActionSheetContent
+            title={actionTrack.title}
+            description={`${actionTrack.artist} · long-press actions`}
+          >
+            {onMoveTrack && actionTrackIndex > 0 && (
+              <ActionSheetClose asChild>
+                <SheetAction
+                  icon={<ArrowUp className="h-5 w-5" />}
+                  label="Move earlier"
+                  onClick={() => onMoveTrack(actionTrack.id, -1)}
+                />
+              </ActionSheetClose>
+            )}
+            {onMoveTrack &&
+              actionTrackIndex >= 0 &&
+              actionTrackIndex < tracks.length - 1 && (
+                <ActionSheetClose asChild>
+                  <SheetAction
+                    icon={<ArrowDown className="h-5 w-5" />}
+                    label="Move later"
+                    onClick={() => onMoveTrack(actionTrack.id, 1)}
+                  />
+                </ActionSheetClose>
+              )}
+            <ActionSheetClose asChild>
+              <SheetAction
+                icon={<Download className="h-5 w-5" />}
+                label="Download track"
+                onClick={() =>
+                  startDownload(
+                    getTrackDownloadUrl(actionTrack.id),
+                    actionTrack.title,
+                  )
+                }
+              />
+            </ActionSheetClose>
+          </ActionSheetContent>
+        )}
+      </ActionSheet>
     </section>
   );
 }
@@ -389,6 +506,7 @@ type TrackListRowProps = {
   track: Track;
   isActive: boolean;
   onSelect: (track: Track) => void;
+  onOpenActions?: (track: Track) => void;
   onQuickAdd?: QuickActionHandler;
   onQuickArchive?: QuickActionHandler;
   onQuickRemove?: QuickActionHandler;
@@ -408,6 +526,7 @@ const TrackListRow = memo(function TrackListRow({
   track,
   isActive,
   onSelect,
+  onOpenActions,
   onQuickAdd,
   onQuickArchive,
   onQuickRemove,
@@ -422,6 +541,7 @@ const TrackListRow = memo(function TrackListRow({
   const pointerIdRef = useRef<number | null>(null);
   const startXRef = useRef(0);
   const suppressClickRef = useRef(false);
+  const longPressTimerRef = useRef<number | null>(null);
   const actionThreshold = 72;
   const maxOffset = 160;
   const canAdd = typeof onQuickAdd === "function";
@@ -472,6 +592,12 @@ const TrackListRow = memo(function TrackListRow({
     suppressClickRef.current = false;
     setIsDragging(true);
     event.currentTarget.setPointerCapture(event.pointerId);
+    if (onOpenActions) {
+      longPressTimerRef.current = window.setTimeout(() => {
+        suppressClickRef.current = true;
+        onOpenActions(track);
+      }, 550);
+    }
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -480,6 +606,10 @@ const TrackListRow = memo(function TrackListRow({
     setDragOffset(delta);
     if (Math.abs(delta) > 6) {
       suppressClickRef.current = true;
+      if (longPressTimerRef.current !== null) {
+        window.clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
     }
   };
 
@@ -495,6 +625,10 @@ const TrackListRow = memo(function TrackListRow({
     }
 
     const delta = clampOffset(event.clientX - startXRef.current);
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
     resetDrag();
 
     let handled = false;
@@ -527,6 +661,10 @@ const TrackListRow = memo(function TrackListRow({
     }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
     }
     resetDrag();
   };
@@ -634,6 +772,12 @@ const TrackListRow = memo(function TrackListRow({
       <button
         type="button"
         onClick={handleClick}
+        onContextMenu={(event) => {
+          if (!onOpenActions) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenActions(track);
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}

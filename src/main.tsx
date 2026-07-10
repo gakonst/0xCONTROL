@@ -3,11 +3,10 @@ import ReactDOM from 'react-dom/client'
 import { QueryClient } from '@tanstack/react-query'
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister'
-import { WagmiProvider } from 'wagmi'
 
 import App from './App'
-import WaveformPreview from './WaveformPreview'
-import { config } from './wagmi'
+import { DownloadStatusProvider } from './components/download-status'
+import { AuthGate } from './components/auth-gate'
 import './index.css'
 
 if (typeof document !== 'undefined') {
@@ -34,10 +33,10 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       gcTime: 1000 * 60 * 60 * 24,
-      staleTime: Infinity,
-      refetchOnMount: false,
-      refetchOnWindowFocus: false,
-      refetchOnReconnect: false,
+      staleTime: 1000 * 30,
+      refetchOnMount: 'always',
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
     },
   },
 })
@@ -58,20 +57,61 @@ const persister = createAsyncStoragePersister({
 
 const isWaveformPreview =
   typeof window !== 'undefined' && window.location.pathname.includes('waveform-preview')
+const isDesignSystemPreview =
+  typeof window !== 'undefined' &&
+  (window.location.pathname === '/ui' || window.location.pathname.startsWith('/ui/'))
+
+const WaveformPreview = React.lazy(() =>
+  import('./WaveformPreview').then((module) => ({
+    default: module.WaveformPreview,
+  })),
+)
+
+const DesignSystemPreview = React.lazy(() =>
+  import('./DesignSystemPreview').then((module) => ({
+    default: module.DesignSystemPreview,
+  })),
+)
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <WagmiProvider config={config}>
-      <PersistQueryClientProvider
-        client={queryClient}
-        persistOptions={{
-          persister,
-          maxAge: 1000 * 60 * 60 * 24,
-        }}
-      >
-        {isWaveformPreview ? <WaveformPreview /> : <App />}
-      </PersistQueryClientProvider>
-    </WagmiProvider>
+    <PersistQueryClientProvider
+      client={queryClient}
+      persistOptions={{
+        persister,
+        maxAge: 1000 * 60 * 60 * 24,
+      }}
+    >
+      {isDesignSystemPreview ? (
+        <React.Suspense
+          fallback={
+            <div className="flex min-h-screen items-center justify-center bg-background text-sm uppercase tracking-[0.12rem] text-muted-foreground">
+              Loading UI system…
+            </div>
+          }
+        >
+          <DesignSystemPreview />
+        </React.Suspense>
+      ) : (
+        <AuthGate>
+          {isWaveformPreview ? (
+            <React.Suspense
+              fallback={
+                <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+                  Loading waveform lab…
+                </div>
+              }
+            >
+              <WaveformPreview />
+            </React.Suspense>
+          ) : (
+            <DownloadStatusProvider>
+              <App />
+            </DownloadStatusProvider>
+          )}
+        </AuthGate>
+      )}
+    </PersistQueryClientProvider>
   </React.StrictMode>,
 )
 

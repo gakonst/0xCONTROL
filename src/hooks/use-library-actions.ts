@@ -14,11 +14,20 @@ export type LibraryActionsDeps = {
   playlistsActions: {
     addTrackToPlaylist: (playlistId: string, trackId: string) => boolean;
     removeTrackFromPlaylist: (playlistId: string, trackId: string) => boolean;
+    moveTrackInPlaylist: (
+      playlistId: string,
+      trackId: string,
+      direction: -1 | 1,
+    ) => boolean;
     createPlaylist: (input: CreatePlaylistInput) => Promise<Playlist | null>;
   };
   preferredPlaylistId: string | null;
   setPreferredPlaylistId: (id: string | null) => void;
-  onTrackSelectedPlay?: (trackId: string) => void;
+  onTrackSelectedPlay?: (
+    trackId: string,
+    queue: Track[],
+    followsCanonicalOrder: boolean,
+  ) => void;
 };
 
 export function useLibraryActions({
@@ -56,9 +65,7 @@ export function useLibraryActions({
     if (!playlists.length) return new Set<string>();
     const ids = new Set<string>();
     for (const playlist of playlists) {
-      for (const trackId of playlist.trackIds) {
-        ids.add(trackId);
-      }
+      for (const trackId of playlist.trackIds) ids.add(trackId);
     }
     return ids;
   }, [playlists]);
@@ -78,12 +85,20 @@ export function useLibraryActions({
   }, [navigation.route.view, activePlaylist, tracks, playlistTrackIds]);
 
   const handleTrackSelect = useCallback(
-    (track: Track) => {
-      onTrackSelectedPlay?.(track.id);
+    (
+      track: Track,
+      displayedQueue?: Track[],
+      followsCanonicalOrder = true,
+    ) => {
+      onTrackSelectedPlay?.(
+        track.id,
+        displayedQueue ?? visibleTracks,
+        followsCanonicalOrder,
+      );
       navigation.route.setView((prev) => prev);
       setIsFullScreenPlayerOpen(false);
     },
-    [navigation.route, onTrackSelectedPlay],
+    [navigation.route, onTrackSelectedPlay, visibleTracks],
   );
 
   const handlePlaylistSelect = useCallback(
@@ -159,6 +174,14 @@ export function useLibraryActions({
     return undefined;
   }, [navigation.route.view, activePlaylist, playlistsActions]);
 
+  const handleMoveTrackInPlaylist = useMemo(() => {
+    if (navigation.route.view.type === "playlistDetail" && activePlaylist) {
+      return (trackId: string, direction: -1 | 1) =>
+        playlistsActions.moveTrackInPlaylist(activePlaylist.id, trackId, direction);
+    }
+    return undefined;
+  }, [navigation.route.view, activePlaylist, playlistsActions]);
+
   const trackListHeader = useMemo(() => {
     if (navigation.route.view.type !== "playlistDetail" || !activePlaylist) return undefined;
     const previousLevelLabel = navigation.route.previousPrimaryView.type === "home"
@@ -174,6 +197,7 @@ export function useLibraryActions({
       backDestinationLabel: previousLevelLabel,
       onBack: navigation.route.exitPlaylistDetail,
       showFullBackRow: true,
+      playlistId: activePlaylist.id,
     } as const;
   }, [navigation.route.view, activePlaylist, navigation.route.previousPrimaryView, navigation.route.exitPlaylistDetail]);
 
@@ -192,6 +216,7 @@ export function useLibraryActions({
     handleQuickAddToPlaylist,
     handleQuickArchiveToPlaylist,
     handleQuickRemoveFromPlaylist,
+    handleMoveTrackInPlaylist,
     trackListHeader,
   };
 }

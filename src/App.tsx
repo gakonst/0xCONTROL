@@ -43,13 +43,15 @@ function App() {
   const playlistsApi = usePlaylists();
   const playlists = playlistsApi.data;
   const setPlaylists = playlistsApi.setData;
-  const { togglePlaylistPin, deletePlaylist } = playlistsApi.actions;
+  const { togglePlaylistPin, deletePlaylist, updatePlaylist } = playlistsApi.actions;
   const isPlaylistsLoading = playlistsApi.isLoading || isRestoring;
   const [preferredPlaylistId, setPreferredPlaylistId] = useState<string | null>(
     null,
   );
   const annotationsApi = useAnnotationsApi(tracks);
   const annotations = annotationsApi.state;
+  const [playbackPlaylistId, setPlaybackPlaylistId] = useState<string | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   useEffect(() => {
     if (!playlists.length) {
@@ -70,6 +72,17 @@ function App() {
       setPreferredPlaylistId(null);
     }
   }, [playlists, preferredPlaylistId]);
+
+  useEffect(() => {
+    if (!playbackPlaylistId) return;
+    const playlist = playlists.find((candidate) => candidate.id === playbackPlaylistId);
+    if (playlist) {
+      playbackApi.setQueue(playlist.trackIds);
+      return;
+    }
+    playbackApi.setQueue([]);
+    setPlaybackPlaylistId(null);
+  }, [playbackApi.setQueue, playbackPlaylistId, playlists]);
 
   const handlePlaylistCreated = useCallback(
     (playlist: Playlist) => {
@@ -111,7 +124,13 @@ function App() {
     playlistsActions: playlistsApi.actions,
     setPreferredPlaylistId,
     preferredPlaylistId,
-    onTrackSelectedPlay: (trackId) => {
+    onTrackSelectedPlay: (trackId, queue, followsCanonicalOrder) => {
+      playbackApi.setQueue(queue.map((track) => track.id));
+      setPlaybackPlaylistId(
+        currentView.type === "playlistDetail" && followsCanonicalOrder
+          ? currentView.playlistId
+          : null,
+      );
       playbackApi.setCurrentTrackId(trackId);
       playbackApi.controls.play();
     },
@@ -130,8 +149,28 @@ function App() {
     handleQuickAddToPlaylist,
     handleQuickArchiveToPlaylist,
     handleQuickRemoveFromPlaylist,
+    handleMoveTrackInPlaylist,
     trackListHeader,
   } = libraryActions;
+
+  const searchAvailable = currentView.type !== "create";
+
+  useEffect(() => {
+    if (!searchAvailable) setIsSearchOpen(false);
+  }, [searchAvailable]);
+
+  const handleTabChange = useCallback(
+    (tab: Parameters<typeof navigation.tabs.set>[0]) => {
+      setIsSearchOpen(false);
+      navigation.tabs.set(tab);
+    },
+    [navigation.tabs.set],
+  );
+
+  const handleSearchToggle = useCallback(() => {
+    setIsFullScreenPlayerOpen(false);
+    setIsSearchOpen((open) => !open);
+  }, [setIsFullScreenPlayerOpen]);
 
   const currentTrack = playbackApi.state.currentTrack ?? tracks[0];
   const currentAnnotation = currentTrack
@@ -175,7 +214,7 @@ function App() {
 
   useEffect(() => () => {
     annotationsApi.flush();
-  }, [annotationsApi]);
+  }, [annotationsApi.flush]);
 
   const footer = currentTrack ? (
     <LibraryFooter
@@ -195,7 +234,10 @@ function App() {
       onSkipPrevious={playbackApi.controls.previous}
       onOpenFullScreen={handleOpenFullScreen}
       activeTab={navigation.tabs.active}
-      onTabChange={navigation.tabs.set}
+      onTabChange={handleTabChange}
+      isSearchOpen={isSearchOpen}
+      onSearchToggle={searchAvailable ? handleSearchToggle : undefined}
+      searchToolsKey={currentView.type === "playlists" ? "playlists" : "tracks"}
     />
   ) : null;
 
@@ -219,6 +261,7 @@ function App() {
           folderPath={folderPath}
           onTogglePin={togglePlaylistPin}
           onDeletePlaylist={deletePlaylist}
+          onUpdatePlaylist={updatePlaylist}
           header={trackListHeader}
           quickAddLabel={quickAddTargetPlaylist?.title}
           onQuickAddToPlaylist={handleQuickAddToPlaylist}
@@ -236,6 +279,7 @@ function App() {
               ? handleQuickRemoveFromPlaylist
               : undefined
           }
+          onMoveTrack={handleMoveTrackInPlaylist}
           annotations={annotations}
           playback={{
             trackId: currentTrack?.id ?? "",
@@ -267,8 +311,10 @@ function App() {
           annotation={currentAnnotation}
           onAnnotationChange={handleCurrentAnnotationChange}
           activeTab={navigation.tabs.active}
+          isSearchOpen={isSearchOpen}
+          onSearchToggle={searchAvailable ? handleSearchToggle : undefined}
           onTabChange={(tab) => {
-            navigation.tabs.set(tab);
+            handleTabChange(tab);
             setIsFullScreenPlayerOpen(false);
           }}
         />

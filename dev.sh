@@ -118,7 +118,13 @@ else
   echo "VITE_R2_DEV_SERVER_URL=http://localhost:${R2_PORT}" >> "$ENV_LOCAL"
 fi
 
-echo "Updated ${ENV_LOCAL} with VITE_R2_DEV_SERVER_URL=http://localhost:${R2_PORT}"
+if grep -q '^VITE_API_BASE_URL=' "$ENV_LOCAL" 2>/dev/null; then
+  sed -i '' "s|^VITE_API_BASE_URL=.*|VITE_API_BASE_URL=http://localhost:${WRANGLER_PORT}|" "$ENV_LOCAL"
+else
+  echo "VITE_API_BASE_URL=http://localhost:${WRANGLER_PORT}" >> "$ENV_LOCAL"
+fi
+
+echo "Updated ${ENV_LOCAL} for the local API and R2 helper"
 
 if [[ "${DEV_WITH_R2_SETUP_ONLY:-0}" == "1" || "${DEV_SETUP_ONLY:-0}" == "1" ]]; then
   echo "Setup complete; skipping process start (DEV_WITH_R2_SETUP_ONLY/DEV_SETUP_ONLY=1)."

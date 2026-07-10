@@ -12,7 +12,19 @@ import {
 import type { Track } from "@/data/tracks";
 import type { Playlist } from "@/types/playlists";
 import { cn } from "@/lib/utils";
-import { LibraryHeader } from "@/components/library-header";
+import {
+  LibraryHeader,
+  LibrarySearchControls,
+} from "@/components/library-header";
+import {
+  FooterToolsPortal,
+  PLAYLIST_FOOTER_TOOLS_TARGET_ID,
+} from "@/components/footer-tools-portal";
+import type { PlaylistMetaUpdates } from "@/data/playlists";
+import {
+  ActionSheet,
+  ActionSheetContent,
+} from "@/components/ui/action-sheet";
 
 export type PlaylistSortField = "title" | "createdAt" | "updatedAt";
 export type PlaylistSortDirection = "asc" | "desc";
@@ -30,6 +42,11 @@ type PlaylistBrowserProps = {
   onSortReset: () => void;
   onTogglePin: (playlistId: string) => void;
   onDeletePlaylist: (playlistId: string) => void;
+  onUpdatePlaylist?: (
+    playlistId: string,
+    updates: PlaylistMetaUpdates,
+  ) => Promise<Playlist | null>;
+  footerToolsActive?: boolean;
 };
 
 export function PlaylistBrowser({
@@ -45,10 +62,17 @@ export function PlaylistBrowser({
   onSortReset,
   onTogglePin,
   onDeletePlaylist,
+  onUpdatePlaylist,
+  footerToolsActive = false,
 }: PlaylistBrowserProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Playlist | null>(null);
   const [showLoading, setShowLoading] = useState(false);
+  const [editingPlaylist, setEditingPlaylist] = useState<Playlist | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editMood, setEditMood] = useState("");
+  const [editFolder, setEditFolder] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const activeFolderPath = folderPath;
   const isSearching = searchQuery.trim().length > 0;
 
@@ -204,6 +228,28 @@ export function PlaylistBrowser({
     setPendingDelete(null);
   };
 
+  const handleRequestEdit = (playlist: Playlist) => {
+    setEditingPlaylist(playlist);
+    setEditTitle(playlist.title);
+    setEditMood(playlist.mood);
+    setEditFolder((playlist.folderPath ?? []).join(" / "));
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingPlaylist || !onUpdatePlaylist || !editTitle.trim()) return;
+    setIsSavingEdit(true);
+    const updated = await onUpdatePlaylist(editingPlaylist.id, {
+      title: editTitle.trim(),
+      mood: editMood.trim(),
+      folderPath: editFolder
+        .split("/")
+        .map((segment) => segment.trim())
+        .filter(Boolean),
+    });
+    setIsSavingEdit(false);
+    if (updated) setEditingPlaylist(null);
+  };
+
   const isEmpty = playlists.length === 0;
 
   const contentPlaylists = folderNavEnabled ? visiblePlaylists : sortedPlaylists;
@@ -335,6 +381,7 @@ export function PlaylistBrowser({
         fallbackInitial={fallbackInitial}
         onTogglePin={onTogglePin}
         onRequestDelete={handleRequestDelete}
+        onRequestEdit={onUpdatePlaylist ? handleRequestEdit : undefined}
         folderHint={folderHint}
       />
     );
@@ -365,6 +412,75 @@ export function PlaylistBrowser({
 
   return (
     <section className="relative flex h-full flex-col overflow-hidden bg-background shadow-[0_25px_120px_rgba(3,7,18,0.85)] backdrop-blur">
+      <FooterToolsPortal
+        active={footerToolsActive}
+        targetId={PLAYLIST_FOOTER_TOOLS_TARGET_ID}
+      >
+        <LibrarySearchControls
+          search={{
+            id: "playlist-search",
+            value: searchQuery,
+            placeholder: "Search playlists or tags",
+            label: "Search playlists",
+            onChange: setSearchQuery,
+          }}
+          onClearSearch={() => setSearchQuery("")}
+          extraControls={extraControls}
+          className="px-4 py-3"
+        />
+      </FooterToolsPortal>
+      <ActionSheet
+        open={Boolean(editingPlaylist)}
+        onOpenChange={(open) => !open && setEditingPlaylist(null)}
+      >
+        {editingPlaylist && (
+          <ActionSheetContent
+            title="Edit playlist"
+            description="Long-press playlist settings"
+          >
+            <form
+              className="grid gap-3 px-1 pb-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleSaveEdit();
+              }}
+            >
+              <label className="grid gap-1 text-[0.6rem] font-semibold uppercase tracking-[0.08rem] text-white/60">
+                Name
+                <input
+                  value={editTitle}
+                  onChange={(event) => setEditTitle(event.target.value)}
+                  className="h-10 border border-white/30 bg-white/5 px-3 text-sm font-normal normal-case tracking-normal text-white outline-none focus:ring-1 focus:ring-white/40"
+                />
+              </label>
+              <label className="grid gap-1 text-[0.6rem] font-semibold uppercase tracking-[0.08rem] text-white/60">
+                Mood
+                <input
+                  value={editMood}
+                  onChange={(event) => setEditMood(event.target.value)}
+                  className="h-10 border border-white/30 bg-white/5 px-3 text-sm font-normal normal-case tracking-normal text-white outline-none focus:ring-1 focus:ring-white/40"
+                />
+              </label>
+              <label className="grid gap-1 text-[0.6rem] font-semibold uppercase tracking-[0.08rem] text-white/60">
+                Folder
+                <input
+                  value={editFolder}
+                  onChange={(event) => setEditFolder(event.target.value)}
+                  placeholder="Sets / 2026"
+                  className="h-10 border border-white/30 bg-white/5 px-3 text-sm font-normal normal-case tracking-normal text-white outline-none placeholder:text-white/35 focus:ring-1 focus:ring-white/40"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={!editTitle.trim() || isSavingEdit}
+                className="mt-1 h-11 border border-white/60 bg-white px-3 text-xs font-semibold uppercase tracking-[0.12rem] text-black transition hover:bg-white/90 disabled:opacity-40"
+              >
+                {isSavingEdit ? "Saving…" : "Save changes"}
+              </button>
+            </form>
+          </ActionSheetContent>
+        )}
+      </ActionSheet>
       {pendingDelete && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
           <div className="w-full max-w-md border border-white/10 bg-black/80 p-5 text-white shadow-[0_25px_60px_rgba(0,0,0,0.6)]">
@@ -407,6 +523,7 @@ export function PlaylistBrowser({
           onChange: setSearchQuery,
         }}
         onClearSearch={() => setSearchQuery("")}
+        showSearchControls={false}
         extraControls={extraControls}
       />
       <div className="flex-1 overflow-auto pb-6">
@@ -505,6 +622,7 @@ type PlaylistListRowProps = {
   onSelect: (playlistId: string) => void;
   onTogglePin: (playlistId: string) => void;
   onRequestDelete: (playlist: Playlist) => void;
+  onRequestEdit?: (playlist: Playlist) => void;
   trackCount: number;
   durationLabel: string;
   updatedLabel: string;
@@ -517,6 +635,7 @@ function PlaylistListRow({
   onSelect,
   onTogglePin,
   onRequestDelete,
+  onRequestEdit,
   trackCount,
   durationLabel,
   updatedLabel,
@@ -528,6 +647,7 @@ function PlaylistListRow({
   const pointerIdRef = useRef<number | null>(null);
   const startXRef = useRef(0);
   const suppressClickRef = useRef(false);
+  const longPressTimerRef = useRef<number | null>(null);
   const actionThreshold = 72;
   const maxOffset = 140;
 
@@ -547,6 +667,12 @@ function PlaylistListRow({
     suppressClickRef.current = false;
     setIsDragging(true);
     event.currentTarget.setPointerCapture(event.pointerId);
+    if (onRequestEdit) {
+      longPressTimerRef.current = window.setTimeout(() => {
+        suppressClickRef.current = true;
+        onRequestEdit(playlist);
+      }, 550);
+    }
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -555,6 +681,10 @@ function PlaylistListRow({
     setDragOffset(delta);
     if (Math.abs(delta) > 6) {
       suppressClickRef.current = true;
+      if (longPressTimerRef.current !== null) {
+        window.clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
     }
   };
 
@@ -564,6 +694,10 @@ function PlaylistListRow({
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     const delta = clampOffset(event.clientX - startXRef.current);
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
     resetDrag();
     if (delta > actionThreshold) {
       onTogglePin(playlist.id);
@@ -581,6 +715,10 @@ function PlaylistListRow({
     if (pointerIdRef.current !== event.pointerId) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
     }
     resetDrag();
   };
@@ -627,6 +765,12 @@ function PlaylistListRow({
       <button
         type="button"
         onClick={handleClick}
+        onContextMenu={(event) => {
+          if (!onRequestEdit) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onRequestEdit(playlist);
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}

@@ -1,6 +1,6 @@
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Download } from "lucide-react";
 
 import { DetailCanvas, OverviewCanvas } from "@/components/waveform-canvas";
 import { FullPlayerBottom } from "@/components/full-player-bottom";
@@ -11,6 +11,8 @@ import { ScreenHeader } from "@/components/screen-header";
 import { parseDurationToSeconds } from "@/lib/time";
 import type { WaveformData } from "@/lib/waveform";
 import type { TrackAnnotation } from "@/types/annotations";
+import { useDownloads } from "@/components/download-status";
+import { getTrackDownloadUrl } from "@/lib/downloads";
 
 type FullScreenPlayerProps = {
   isOpen: boolean;
@@ -32,6 +34,8 @@ type FullScreenPlayerProps = {
   onAnnotationChange?: (update: Partial<TrackAnnotation>) => void;
   activeTab: LibraryTabKey;
   onTabChange: (tab: LibraryTabKey) => void;
+  isSearchOpen?: boolean;
+  onSearchToggle?: () => void;
 };
 
 export function FullScreenPlayer({
@@ -54,7 +58,10 @@ export function FullScreenPlayer({
   onAnnotationChange,
   activeTab,
   onTabChange,
+  isSearchOpen = false,
+  onSearchToggle,
 }: FullScreenPlayerProps) {
+  const { startDownload } = useDownloads();
   const [controlsInteractive, setControlsInteractive] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const [bottomInset, setBottomInset] = useState(200);
@@ -153,14 +160,24 @@ export function FullScreenPlayer({
       <ScreenHeader
         title="Now Playing"
         trailing={
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/30 bg-black/40 text-white/80 transition hover:border-white/50 hover:text-white"
-            aria-label="Close player"
-          >
-            <ChevronDown className="h-5 w-5" />
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => startDownload(getTrackDownloadUrl(track.id), track.title)}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-white/30 bg-black/40 text-white/80 transition hover:border-white/50 hover:text-white"
+              aria-label={`Download ${track.title}`}
+            >
+              <Download className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-white/30 bg-black/40 text-white/80 transition hover:border-white/50 hover:text-white"
+              aria-label="Close player"
+            >
+              <ChevronDown className="h-5 w-5" />
+            </button>
+          </>
         }
       />
 
@@ -282,6 +299,8 @@ export function FullScreenPlayer({
           onSeek={onSeek}
           activeTab={activeTab}
           onTabChange={onTabChange}
+          isSearchOpen={isSearchOpen}
+          onSearchToggle={onSearchToggle}
           interactive={controlsInteractive}
           bottomRef={bottomRef}
         />
@@ -305,6 +324,8 @@ type FullScreenBottomPanelProps = {
   onSeek: (seconds: number) => void;
   activeTab: LibraryTabKey;
   onTabChange: (tab: LibraryTabKey) => void;
+  isSearchOpen: boolean;
+  onSearchToggle?: () => void;
   interactive: boolean;
   bottomRef: RefObject<HTMLDivElement>;
 };
@@ -324,6 +345,8 @@ function FullScreenBottomPanel({
   onSeek,
   activeTab,
   onTabChange,
+  isSearchOpen,
+  onSearchToggle,
   interactive,
   bottomRef,
 }: FullScreenBottomPanelProps) {
@@ -349,7 +372,12 @@ function FullScreenBottomPanel({
           onSeek={onSeek}
         />
         <div className="border-t border-white/10">
-          <LibraryTabs activeTab={activeTab} onTabChange={onTabChange} />
+          <LibraryTabs
+            activeTab={activeTab}
+            onTabChange={onTabChange}
+            isSearchOpen={isSearchOpen}
+            onSearchToggle={onSearchToggle}
+          />
         </div>
       </div>
     </div>

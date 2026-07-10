@@ -27,6 +27,26 @@
         --font-sans:
             "Space Grotesk", "Inter", "Inter Variable", system-ui,
             -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+        /* Semantic aliases for new capabilities; legacy values stay canonical. */
+        --canvas: var(--background);
+        --surface: var(--card);
+        --surface-raised: var(--secondary);
+        --surface-elevated: var(--popover);
+        --surface-hover: var(--muted);
+        --text: var(--foreground);
+        --text-muted: var(--muted-foreground);
+        --text-subtle: 215 16% 48%;
+        --stroke: var(--border);
+        --stroke-strong: 215 30% 30%;
+        --brand: var(--primary);
+        --brand-strong: var(--accent);
+        --brand-ink: var(--primary-foreground);
+        --focus: var(--ring);
+        --danger: var(--destructive);
+        --danger-soft: 357 45% 17%;
+        --radius-control: 0rem;
+        --radius-surface: var(--radius);
     }
 
     * {
@@ -38,6 +58,16 @@
         overflow: hidden;
         font-family: var(--font-sans);
         background-color: hsl(var(--background));
+    }
+}
+
+@layer utilities {
+    .safe-top {
+        padding-top: max(0.75rem, env(safe-area-inset-top));
+    }
+
+    .safe-bottom {
+        padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
     }
 }
 

@@ -35,3 +35,10 @@ export function buildApiUrl(path: string): string {
 
   return `${effectiveBase}${normalizedPath}`;
 }
+
+export function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(buildApiUrl(path), {
+    ...init,
+    credentials: init.credentials ?? "include",
+  });
+}

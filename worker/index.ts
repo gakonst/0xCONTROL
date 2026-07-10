@@ -7,6 +7,13 @@ import { cors } from "hono/cors";
 import type { MiddlewareHandler } from "hono";
 import type { PresetKey } from "../src/lib/waveform";
 import type { WaveformAnalysis, WaveformData } from "../src/lib/waveform";
+import {
+  calculateZipSize,
+  createZipStream,
+  sanitizeArchiveEntryName,
+  type ZipEntry,
+  type ZipObjectEntry,
+} from "./zip";
 
 type AnnotationColor = "red" | "blue" | "pink" | "cyan";
 
@@ -98,11 +105,20 @@ interface PlaylistRecord {
 type PlaylistMetaUpdatePayload = {
   isPinned?: boolean;
   isFavorite?: boolean;
+  title?: string;
+  description?: string;
+  mood?: string;
+  tags?: string[];
+  folderPath?: string[];
 };
 
 type PlaylistTrackInput = {
   trackId?: string;
   position?: number;
+};
+
+type PlaylistReorderPayload = {
+  trackIds?: string[];
 };
 
 type PlaylistCreatePayload = {
@@ -164,7 +180,7 @@ export class AnalyzerContainer extends Container {
 
 export interface Env {
   ASSETS: Fetcher;
-  SONG_PASSWORD: string;
+  SONG_PASSWORD?: string;
   TRACKS_BUCKET: R2Bucket;
   TRACKS_QUEUE: Queue;
   TRACKS_DB: D1Database;
@@ -198,15 +214,91 @@ app.use(
   "/api/*",
   cors({
     origin: (origin) => origin ?? "*",
-    allowMethods: ["GET", "OPTIONS", "PATCH", "POST", "DELETE"],
-    allowHeaders: ["Content-Type", "Cache-Control"],
+    credentials: true,
+    allowMethods: ["GET", "HEAD", "OPTIONS", "PATCH", "POST", "DELETE"],
+    allowHeaders: ["Content-Type", "Cache-Control", "Authorization"],
+    exposeHeaders: [
+      "Content-Disposition",
+      "Content-Length",
+      "X-0xControl-Missing-Tracks",
+    ],
   }),
 );
 
-async function authenticateRequest(_c: Parameters<typeof requireAuth>[0]) {
-  // TODO: wire proper auth once we lock requirements.
-  return true;
+async function authenticateRequest(c: Parameters<typeof requireAuth>[0]) {
+  const password = c.env.SONG_PASSWORD?.trim();
+  if (!password || password === "true") return false;
+  const authorization = c.req.header("authorization");
+  if (authorization?.startsWith("Bearer ")) {
+    const supplied = authorization.slice("Bearer ".length).trim();
+    const [suppliedToken, expectedToken] = await Promise.all([
+      createSessionToken(supplied),
+      createSessionToken(password),
+    ]);
+    return Boolean(supplied) && constantTimeEqual(suppliedToken, expectedToken);
+  }
+  const session = readCookie(c.req.header("cookie"), "0xcontrol_session");
+  if (!session) return false;
+  const expected = await createSessionToken(password);
+  return constantTimeEqual(session, expected);
 }
+
+app.get("/api/auth/session", async (c) => {
+  if (!(await authenticateRequest(c))) {
+    return c.json(
+      { authenticated: false, configured: isAuthenticationConfigured(c.env) },
+      401,
+    );
+  }
+  return c.json({ authenticated: true, configured: true });
+});
+
+app.post("/api/auth/session", async (c) => {
+  const configuredPassword = c.env.SONG_PASSWORD?.trim();
+  if (!configuredPassword || configuredPassword === "true") {
+    return c.json(
+      {
+        authenticated: false,
+        configured: false,
+        error: "Authentication is not configured",
+      },
+      503,
+    );
+  }
+  let payload: { password?: string } | null = null;
+  try {
+    payload = (await c.req.json()) as { password?: string };
+  } catch {
+    return c.json({ authenticated: false, configured: true }, 400);
+  }
+  const submitted = typeof payload?.password === "string" ? payload.password : "";
+  const [submittedToken, expectedToken] = await Promise.all([
+    createSessionToken(submitted),
+    createSessionToken(configuredPassword),
+  ]);
+  if (!submitted || !constantTimeEqual(submittedToken, expectedToken)) {
+    return c.json(
+      { authenticated: false, configured: true, error: "Incorrect passcode" },
+      401,
+    );
+  }
+
+  const secure = new URL(c.req.url).protocol === "https:" ? "; Secure" : "";
+  c.header(
+    "Set-Cookie",
+    `0xcontrol_session=${expectedToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800${secure}`,
+  );
+  return c.json({ authenticated: true, configured: true });
+});
+
+app.delete("/api/auth/session", async (c) => {
+  const secure = new URL(c.req.url).protocol === "https:" ? "; Secure" : "";
+  c.header(
+    "Set-Cookie",
+    `0xcontrol_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure}`,
+  );
+  return c.json({ authenticated: false, configured: isAuthenticationConfigured(c.env) });
+});
 
 app.get("/api/tracks", requireAuth, async (c) => {
   const catalog = await buildCatalogResponse(c.env, c.executionCtx);
@@ -222,7 +314,7 @@ app.get("/api/catalog", requireAuth, async (c) => {
   });
 });
 
-app.post("/api/tracks/upload", async (c) => {
+app.post("/api/tracks/upload", requireAuth, async (c) => {
   let form: FormData;
   try {
     form = await c.req.formData();
@@ -253,7 +345,7 @@ app.post("/api/tracks/upload", async (c) => {
   return c.json(result, result.status === "created" ? 201 : 200);
 });
 
-app.post("/api/tracks/upload/bulk", async (c) => {
+app.post("/api/tracks/upload/bulk", requireAuth, async (c) => {
   let form: FormData;
   try {
     form = await c.req.formData();
@@ -533,7 +625,46 @@ app.patch("/api/playlists/:playlistId", requireAuth, async (c) => {
   }
 
   const setStatements: string[] = [];
-  const parameters: Array<number | string> = [];
+  const parameters: Array<number | string | null> = [];
+
+  if (Object.prototype.hasOwnProperty.call(payload, "title")) {
+    const title = typeof payload.title === "string" ? payload.title.trim() : "";
+    if (!title) return c.text("Playlist title is required", 400);
+    setStatements.push("title = ?");
+    parameters.push(title.slice(0, 200));
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "description")) {
+    const description =
+      typeof payload.description === "string" ? payload.description.trim() : "";
+    setStatements.push("description = ?");
+    parameters.push(description.slice(0, 1000));
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "mood")) {
+    const mood = typeof payload.mood === "string" ? payload.mood.trim() : "";
+    setStatements.push("mood = ?");
+    parameters.push(mood.slice(0, 120));
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "tags")) {
+    const tags = Array.isArray(payload.tags)
+      ? payload.tags.map((tag) => String(tag).trim()).filter(Boolean).slice(0, 50)
+      : [];
+    setStatements.push("tags = ?");
+    parameters.push(tags.length ? JSON.stringify(tags) : null);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "folderPath")) {
+    const folderPath = Array.isArray(payload.folderPath)
+      ? payload.folderPath
+          .map((segment) => String(segment).trim())
+          .filter(Boolean)
+          .slice(0, 20)
+      : [];
+    setStatements.push("folder_path = ?");
+    parameters.push(folderPath.length ? JSON.stringify(folderPath) : null);
+  }
 
   if (Object.prototype.hasOwnProperty.call(payload, "isPinned")) {
     const normalizedPinned =
@@ -657,6 +788,50 @@ app.post("/api/playlists/:playlistId/tracks", requireAuth, async (c) => {
   return c.json({ playlist });
 });
 
+app.patch("/api/playlists/:playlistId/tracks", requireAuth, async (c) => {
+  const playlistId = c.req.param("playlistId");
+  if (!playlistId) {
+    return c.text("Playlist identifier is required", 400);
+  }
+  let payload: PlaylistReorderPayload | null = null;
+  try {
+    payload = (await c.req.json()) as PlaylistReorderPayload;
+  } catch {
+    return c.text("Invalid JSON payload", 400);
+  }
+  const trackIds = Array.isArray(payload?.trackIds)
+    ? payload.trackIds.map((trackId) => String(trackId))
+    : null;
+  if (!trackIds || new Set(trackIds).size !== trackIds.length) {
+    return c.text("trackIds must be a unique ordered array", 400);
+  }
+
+  const playlist = await loadPlaylistById(c.env.TRACKS_DB, playlistId);
+  if (!playlist) return c.text("Playlist not found", 404);
+  if (
+    playlist.trackIds.length !== trackIds.length ||
+    playlist.trackIds.some((trackId) => !trackIds.includes(trackId))
+  ) {
+    return c.text("trackIds must contain every track currently in the playlist", 400);
+  }
+
+  if (trackIds.length) {
+    const updates = trackIds.map((trackId, index) =>
+      c.env.TRACKS_DB.prepare(
+        "UPDATE playlist_tracks SET position = ? WHERE playlist_id = ? AND track_id = ?",
+      ).bind(index, playlistId, trackId),
+    );
+    const results = await c.env.TRACKS_DB.batch(updates);
+    if (results.some((result) => !result.success)) {
+      return c.text("Failed to reorder playlist", 500);
+    }
+  }
+
+  await touchPlaylistUpdatedAt(c.env.TRACKS_DB, playlistId);
+  const updated = await loadPlaylistById(c.env.TRACKS_DB, playlistId);
+  return c.json({ playlist: updated });
+});
+
 app.delete(
   "/api/playlists/:playlistId/tracks/:trackId",
   requireAuth,
@@ -687,6 +862,64 @@ app.delete(
     return c.json({ playlist });
   },
 );
+
+app.get("/api/playlists/:playlistId/download", requireAuth, async (c) => {
+  const playlistId = c.req.param("playlistId");
+  if (!playlistId) {
+    return c.text("Playlist identifier is required", 400);
+  }
+
+  const playlist = await loadPlaylistById(c.env.TRACKS_DB, playlistId);
+  if (!playlist) {
+    return c.text("Playlist not found", 404);
+  }
+  if (!playlist.trackIds.length) {
+    return c.text("Playlist has no tracks", 409);
+  }
+
+  const catalog = await loadCatalogFromDb(c.env.TRACKS_DB);
+  const trackMap = new Map(catalog.map((track) => [track.id, track]));
+  const { entries, missingTrackIds } = await preparePlaylistZipEntries(
+    c.env.TRACKS_BUCKET,
+    playlist.trackIds,
+    trackMap,
+  );
+
+  if (!entries.length) {
+    return c.text("No playlist tracks are available to download", 404);
+  }
+
+  if (missingTrackIds.length) {
+    const missingText = [
+      "The following tracks were not available when this playlist was exported:",
+      "",
+      ...missingTrackIds,
+      "",
+    ].join("\n");
+    entries.push({
+      name: "0xcontrol-missing-tracks.txt",
+      bytes: new TextEncoder().encode(missingText),
+    });
+  }
+
+  const archiveSize = calculateZipSize(entries);
+  if (entries.length > 0xffff || archiveSize > 0xffffffff) {
+    return c.text("Playlist is too large for ZIP export", 413);
+  }
+
+  const headers = new Headers({
+    "Content-Type": "application/zip",
+    "Content-Disposition": buildAttachmentDisposition(`${playlist.title}.zip`),
+    "Content-Length": String(archiveSize),
+    "Cache-Control": "private, no-store",
+    "X-0xControl-Missing-Tracks": String(missingTrackIds.length),
+  });
+
+  if (c.req.method === "HEAD") {
+    return new Response(null, { headers });
+  }
+  return new Response(createZipStream(c.env.TRACKS_BUCKET, entries), { headers });
+});
 
 app.patch("/api/tracks/:trackId/annotation", requireAuth, async (c) => {
   const trackId = c.req.param("trackId");
@@ -806,6 +1039,38 @@ const trackStreamHandler: MiddlewareHandler<WorkerContext> = async (c) => {
   }
 };
 
+const trackDownloadHandler: MiddlewareHandler<WorkerContext> = async (c) => {
+  const rawTrackId = c.req.param("trackId");
+  const candidateKeys = buildTrackKeyCandidates(rawTrackId);
+  if (!candidateKeys.length) {
+    return c.text("Invalid track identifier", 400);
+  }
+
+  try {
+    let object: R2ObjectBody | null = null;
+    for (const key of candidateKeys) {
+      object = await c.env.TRACKS_BUCKET.get(key);
+      if (object) break;
+    }
+    if (!object) {
+      return c.text("Track not found", 404);
+    }
+
+    const { headers } = buildTrackResponseHeaders(object, {
+      isPartialRequest: false,
+    });
+    headers.set(
+      "Content-Disposition",
+      buildAttachmentDisposition(fileNameFromObjectKey(object.key)),
+    );
+    headers.set("Cache-Control", "private, no-store");
+    return new Response(c.req.method === "HEAD" ? null : object.body, { headers });
+  } catch (error) {
+    console.error("Failed to download track from R2", error);
+    return c.text("Unable to download track", 500);
+  }
+};
+
 async function serveStreamObject(
   c: Parameters<MiddlewareHandler<WorkerContext>>[0],
   trackId: string,
@@ -862,6 +1127,7 @@ const streamPlaylistHandler: MiddlewareHandler<WorkerContext> = async (c) => {
   return serveStreamObject(c, trackId, "index.m3u8");
 };
 
+app.get("/api/tracks/:trackId/download", requireAuth, trackDownloadHandler);
 app.get("/api/tracks/:trackId", requireAuth, trackStreamHandler);
 app.get("/api/tracks/:trackId/stream", requireAuth, streamPlaylistHandler);
 app.get("/api/streams/:trackId/:file", requireAuth, streamAssetHandler);
@@ -2092,6 +2358,103 @@ function inferContentTypeFromKey(key: string): string {
     default:
       return "application/octet-stream";
   }
+}
+
+async function preparePlaylistZipEntries(
+  bucket: R2Bucket,
+  trackIds: string[],
+  trackMap: Map<string, TrackRecord>,
+): Promise<{ entries: ZipEntry[]; missingTrackIds: string[] }> {
+  const width = Math.max(2, String(trackIds.length).length);
+  const resolved = await runWithConcurrency(trackIds, 6, async (trackId, index) => {
+    let object: R2Object | null = null;
+    for (const key of buildTrackKeyCandidates(trackId)) {
+      object = await bucket.head(key);
+      if (!object) {
+        const rangedObject = await bucket.get(key, {
+          range: { offset: 0, length: 1 },
+        });
+        if (rangedObject) {
+          await rangedObject.body.cancel().catch(() => undefined);
+          object = rangedObject;
+        }
+      }
+      if (object) break;
+    }
+    if (!object) return null;
+
+    const track = trackMap.get(trackId);
+    const parsed = parseTrackNameFromFilename(trackId);
+    const artist = track?.artist?.trim() || parsed.artist || "Unknown Artist";
+    const title = track?.name?.trim() || parsed.title;
+    const extension = getArchiveExtension(object.key);
+    const orderedName = `${String(index + 1).padStart(width, "0")} ${artist} - ${title}${extension}`;
+
+    return {
+      name: sanitizeArchiveEntryName(orderedName),
+      objectKey: object.key,
+      size: object.size,
+    } satisfies ZipObjectEntry;
+  });
+
+  const entries: ZipEntry[] = [];
+  const missingTrackIds: string[] = [];
+  resolved.forEach((entry, index) => {
+    if (entry) entries.push(entry);
+    else missingTrackIds.push(trackIds[index]);
+  });
+  return { entries, missingTrackIds };
+}
+
+function getArchiveExtension(key: string): string {
+  const match = /\.[a-z0-9]{1,5}$/i.exec(key.split("/").pop() ?? "");
+  return match ? match[0].toLowerCase() : ".bin";
+}
+
+function fileNameFromObjectKey(key: string): string {
+  const raw = key.split("/").pop() || "track";
+  const decoded = safeDecodeURIComponent(raw) ?? raw;
+  return sanitizeArchiveEntryName(decoded);
+}
+
+function buildAttachmentDisposition(fileName: string): string {
+  const safeName = sanitizeArchiveEntryName(fileName);
+  const ascii = safeName.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  const encoded = encodeURIComponent(safeName).replace(/[!'()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+function isAuthenticationConfigured(env: Env): boolean {
+  const password = env.SONG_PASSWORD?.trim();
+  return Boolean(password && password !== "true");
+}
+
+async function createSessionToken(password: string): Promise<string> {
+  const bytes = new TextEncoder().encode(`0xcontrol-session:${password}`);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  let binary = "";
+  for (const byte of digest) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  const length = Math.max(left.length, right.length);
+  let difference = left.length ^ right.length;
+  for (let index = 0; index < length; index += 1) {
+    difference |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
+  }
+  return difference === 0;
+}
+
+function readCookie(header: string | undefined, name: string): string | null {
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const [key, ...value] = part.trim().split("=");
+    if (key === name) return value.join("=") || null;
+  }
+  return null;
 }
 
 function isValidAnnotationColor(value: string): value is AnnotationColor {

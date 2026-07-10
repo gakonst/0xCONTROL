@@ -92,7 +92,11 @@ async function fetchPlaylistText(
   signal?: AbortSignal,
 ): Promise<string | null> {
   try {
-    const response = await fetch(playlistUrl, { signal, cache: "force-cache" });
+    const response = await fetch(playlistUrl, {
+      signal,
+      cache: "force-cache",
+      credentials: "include",
+    });
     if (!response.ok) return null;
     return response.text();
   } catch (error) {
@@ -173,7 +177,11 @@ async function prefetchUrls(
   for (const url of urls) {
     if (signal?.aborted) return;
     try {
-      const response = await fetch(url, { signal, cache: "force-cache" });
+      const response = await fetch(url, {
+        signal,
+        cache: "force-cache",
+        credentials: "include",
+      });
       if (!response.ok) continue;
       await response.arrayBuffer();
     } catch (error) {

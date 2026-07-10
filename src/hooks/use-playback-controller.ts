@@ -7,13 +7,15 @@ import {
   type MutableRefObject,
 } from "react";
 
-import Hls from "hls.js";
-
 import { getTrackStreamUrl, getTrackUrl, type Track } from "@/data/tracks";
+
+type HlsConstructor = typeof import("hls.js").default;
+type HlsInstance = InstanceType<HlsConstructor>;
 
 type PlaybackController = {
   currentTrackId: string;
   setCurrentTrackId: (id: string) => void;
+  setQueue: (trackIds: string[]) => void;
   currentTrack: Track | undefined;
   isPlaying: boolean;
   isBuffering: boolean;
@@ -46,9 +48,19 @@ export function usePlaybackController(
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const trackUrlRef = useRef<string>("");
-  const hlsRef = useRef<any | null>(null);
+  const hlsRef = useRef<HlsInstance | null>(null);
   const goToNextTrackRef = useRef<() => void>(() => {});
-  const tracksRef = useRef<Track[]>(tracks);
+  const [queueTrackIds, setQueueTrackIds] = useState<string[]>([]);
+
+  const playbackQueue = useMemo(() => {
+    if (!queueTrackIds.length) return tracks;
+    const trackMap = new Map(tracks.map((track) => [track.id, track]));
+    const queue = queueTrackIds
+      .map((trackId) => trackMap.get(trackId))
+      .filter((track): track is Track => Boolean(track));
+    return queue.length ? queue : tracks;
+  }, [queueTrackIds, tracks]);
+  const tracksRef = useRef<Track[]>(playbackQueue);
 
   const currentTrack = useMemo(
     () => tracks.find((track) => track.id === currentTrackId),
@@ -56,8 +68,8 @@ export function usePlaybackController(
   );
 
   useEffect(() => {
-    tracksRef.current = tracks;
-  }, [tracks]);
+    tracksRef.current = playbackQueue;
+  }, [playbackQueue]);
 
   useEffect(() => {
     if (!tracks.length) return;
@@ -67,13 +79,20 @@ export function usePlaybackController(
 
   const goToTrackByOffset = useCallback(
     (offset: number) => {
-      if (!currentTrack || tracks.length === 0) return;
-      const index = tracks.findIndex((track) => track.id === currentTrack.id);
-      if (index === -1) return;
-      const nextTrack = tracks[(index + offset + tracks.length) % tracks.length];
+      if (!currentTrack || playbackQueue.length === 0) return;
+      const index = playbackQueue.findIndex((track) => track.id === currentTrack.id);
+      if (index === -1) {
+        const fallback = offset > 0 ? playbackQueue[0] : playbackQueue.at(-1);
+        if (fallback) setCurrentTrackId(fallback.id);
+        return;
+      }
+      const nextTrack =
+        playbackQueue[
+          (index + offset + playbackQueue.length) % playbackQueue.length
+        ];
       setCurrentTrackId(nextTrack.id);
     },
-    [currentTrack, tracks],
+    [currentTrack, playbackQueue],
   );
 
   const goToNextTrack = useCallback(() => {
@@ -92,6 +111,7 @@ export function usePlaybackController(
     if (!audioRef.current) {
       const audio = new Audio();
       audio.preload = "auto";
+      audio.crossOrigin = "use-credentials";
       audioRef.current = audio;
     }
 
@@ -159,11 +179,13 @@ export function usePlaybackController(
 
   useEffect(() => {
     if (!currentTrackId || !currentTrack) return;
+    let cancelled = false;
 
     const ensureAudio = () => {
       if (!audioRef.current) {
         const audio = new Audio();
         audio.preload = "auto";
+        audio.crossOrigin = "use-credentials";
         audioRef.current = audio;
       }
       return audioRef.current;
@@ -189,21 +211,26 @@ export function usePlaybackController(
       audio.load();
     };
 
-    const useHls = () => {
+    const useHls = (HlsConstructor: HlsConstructor) => {
       if (trackUrlRef.current === streamUrl && hlsRef.current) return;
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
 
-      const hls = new Hls({ enableWorker: true });
+      const hls = new HlsConstructor({
+        enableWorker: true,
+        xhrSetup: (xhr: XMLHttpRequest) => {
+          xhr.withCredentials = true;
+        },
+      });
       hlsRef.current = hls;
       trackUrlRef.current = streamUrl;
       setIsBuffering(true);
       setElapsedSeconds(0);
       setDurationSeconds(null);
 
-      hls.on(Hls.Events.ERROR, (_: unknown, data: { fatal: boolean }) => {
+      hls.on(HlsConstructor.Events.ERROR, (_: unknown, data: { fatal: boolean }) => {
         if (!data.fatal) return;
         console.warn("HLS playback failed, falling back", data);
         useDirectUrl(fallbackUrl);
@@ -221,17 +248,30 @@ export function usePlaybackController(
       if (trackUrlRef.current === streamUrl) {
         console.warn("Stream unavailable, falling back to MP3");
         useDirectUrl(fallbackUrl);
+        return;
       }
+      setIsBuffering(false);
     };
 
     audio.addEventListener("error", handleError);
 
-    if (Hls.isSupported()) {
-      useHls();
-    } else if (canPlayNativeHls) {
+    if (canPlayNativeHls) {
       useDirectUrl(streamUrl);
     } else {
-      useDirectUrl(fallbackUrl);
+      void import("hls.js")
+        .then(({ default: HlsConstructor }) => {
+          if (cancelled) return;
+          if (HlsConstructor.isSupported()) {
+            useHls(HlsConstructor);
+            return;
+          }
+          useDirectUrl(fallbackUrl);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          console.warn("Unable to load HLS playback support", error);
+          useDirectUrl(fallbackUrl);
+        });
     }
 
     if (isPlaying) {
@@ -247,21 +287,36 @@ export function usePlaybackController(
     }
 
     return () => {
+      cancelled = true;
       audio.removeEventListener("error", handleError);
     };
   }, [currentTrack, currentTrackId, isPlaying]);
 
-  const handleTogglePlay = useCallback(() => {
-    setIsPlaying((prev) => !prev);
-  }, []);
-
   const handlePlayRequest = useCallback(() => {
-    setIsPlaying(true);
+    const audio = audioRef.current;
+    if (!audio) return;
+    const playPromise = audio.play();
+    if (playPromise) {
+      playPromise.catch((error) => {
+        console.error("Unable to start playback", error);
+        setIsPlaying(false);
+      });
+    }
   }, []);
 
   const handlePauseRequest = useCallback(() => {
-    setIsPlaying(false);
+    audioRef.current?.pause();
   }, []);
+
+  const handleTogglePlay = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      handlePlayRequest();
+      return;
+    }
+    handlePauseRequest();
+  }, [handlePauseRequest, handlePlayRequest]);
 
   const seekBy = useCallback((deltaSeconds: number) => {
     const audio = audioRef.current;
@@ -313,6 +368,7 @@ export function usePlaybackController(
   return {
     currentTrackId,
     setCurrentTrackId,
+    setQueue: setQueueTrackIds,
     currentTrack,
     isPlaying,
     isBuffering,

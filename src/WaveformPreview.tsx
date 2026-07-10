@@ -57,6 +57,7 @@ export function WaveformPreview() {
       try {
         const response = await fetch(buildApiUrl("/api/catalog"), {
           cache: "no-store",
+          credentials: "include",
         });
         if (!response.ok) throw new Error(`catalog status ${response.status}`);
         const payload = (await response.json()) as { tracks?: CatalogRecord[] };
@@ -355,7 +356,7 @@ function buildR2SourceFromCatalog(record?: CatalogRecord): TrackSource | null {
     originalName: path,
     bpm: record.bpm ?? null,
     fetchArrayBuffer: async () => {
-      const response = await fetch(url);
+      const response = await fetch(url, { credentials: "include" });
       if (!response.ok) throw new Error(`audio request failed (${response.status})`);
       return response.arrayBuffer();
     },

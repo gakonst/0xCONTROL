@@ -84,7 +84,7 @@ async function loadRemoteCatalogRecords(
   signal?: AbortSignal,
 ): Promise<CatalogTrackRecord[]> {
   const catalogUrl = buildCatalogUrl();
-  const response = await fetch(catalogUrl, { signal });
+  const response = await fetch(catalogUrl, { signal, credentials: "include" });
 
   if (!response.ok) {
     throw new Error(`Catalog request failed with status ${response.status}`);

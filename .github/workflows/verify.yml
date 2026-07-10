@@ -19,5 +19,11 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Run unit tests
+        run: bun test
+
       - name: Build project
         run: bun run build
+
+      - name: Bundle Worker
+        run: bunx wrangler deploy --dry-run --outdir /tmp/worker-dry-run --env=""

@@ -1,4 +1,4 @@
-import { buildApiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import type { Playlist } from "@/types/playlists";
 
 type ApiPlaylist = {
@@ -26,9 +26,14 @@ type PlaylistResponse = {
   playlist: ApiPlaylist;
 };
 
-type PlaylistMetaUpdates = {
+export type PlaylistMetaUpdates = {
   isPinned?: boolean;
   isFavorite?: boolean;
+  title?: string;
+  description?: string;
+  mood?: string;
+  tags?: string[];
+  folderPath?: string[];
 };
 
 export type CreatePlaylistInput = {
@@ -42,7 +47,7 @@ export type CreatePlaylistInput = {
 export async function fetchPlaylists(
   signal?: AbortSignal,
 ): Promise<Playlist[]> {
-  const response = await fetch(buildApiUrl("/api/playlists"), {
+  const response = await apiFetch("/api/playlists", {
     method: "GET",
     signal,
     headers: {
@@ -61,7 +66,7 @@ export async function fetchPlaylists(
 export async function createPlaylist(
   input: CreatePlaylistInput,
 ): Promise<Playlist> {
-  const response = await fetch(buildApiUrl("/api/playlists"), {
+  const response = await apiFetch("/api/playlists", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -83,8 +88,8 @@ export async function updatePlaylistMeta(
   playlistId: string,
   updates: PlaylistMetaUpdates,
 ): Promise<Playlist> {
-  const response = await fetch(
-    buildApiUrl(`/api/playlists/${encodeURIComponent(playlistId)}`),
+  const response = await apiFetch(
+    `/api/playlists/${encodeURIComponent(playlistId)}`,
     {
       method: "PATCH",
       headers: {
@@ -107,8 +112,8 @@ export async function updatePlaylistMeta(
 export async function deletePlaylist(
   playlistId: string,
 ): Promise<{ playlistId: string }> {
-  const response = await fetch(
-    buildApiUrl(`/api/playlists/${encodeURIComponent(playlistId)}`),
+  const response = await apiFetch(
+    `/api/playlists/${encodeURIComponent(playlistId)}`,
     {
       method: "DELETE",
     },
@@ -127,8 +132,8 @@ export async function addTrackToPlaylist(
   playlistId: string,
   trackId: string,
 ): Promise<Playlist> {
-  const response = await fetch(
-    buildApiUrl(`/api/playlists/${encodeURIComponent(playlistId)}/tracks`),
+  const response = await apiFetch(
+    `/api/playlists/${encodeURIComponent(playlistId)}/tracks`,
     {
       method: "POST",
       headers: {
@@ -152,10 +157,8 @@ export async function removeTrackFromPlaylist(
   playlistId: string,
   trackId: string,
 ): Promise<Playlist> {
-  const response = await fetch(
-    buildApiUrl(
-      `/api/playlists/${encodeURIComponent(playlistId)}/tracks/${encodeURIComponent(trackId)}`,
-    ),
+  const response = await apiFetch(
+    `/api/playlists/${encodeURIComponent(playlistId)}/tracks/${encodeURIComponent(trackId)}`,
     {
       method: "DELETE",
     },
@@ -167,6 +170,25 @@ export async function removeTrackFromPlaylist(
     );
   }
 
+  const payload = (await response.json()) as PlaylistResponse;
+  return normalizePlaylist(payload.playlist);
+}
+
+export async function reorderPlaylistTracks(
+  playlistId: string,
+  trackIds: string[],
+): Promise<Playlist> {
+  const response = await apiFetch(
+    `/api/playlists/${encodeURIComponent(playlistId)}/tracks`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trackIds }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to reorder playlist (status ${response.status})`);
+  }
   const payload = (await response.json()) as PlaylistResponse;
   return normalizePlaylist(payload.playlist);
 }

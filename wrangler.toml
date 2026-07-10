@@ -13,7 +13,6 @@ enabled = true
 name = "zero-control-dapp-preview"
 
 [env.preview.vars]
-SONG_PASSWORD = "true"
 R2_BUCKET_NAME = "zero-control-tracks-preview"
 R2_ACCOUNT_ID = "replace-me"
 
@@ -61,7 +60,6 @@ database_id = "e661b526-7ef4-4d29-a826-74d8224f3b1b"
 database_name = "zero-control-tracks"
 
 [vars]
-SONG_PASSWORD = "true"
 R2_BUCKET_NAME = "zero-control-tracks"
 R2_ACCOUNT_ID = "7fb82fc3b80331b2cd45f097acbd9ffc"
 
